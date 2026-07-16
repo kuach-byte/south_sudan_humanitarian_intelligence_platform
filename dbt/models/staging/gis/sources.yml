@@ -1,0 +1,72 @@
+# models/staging/gis/sources.yml
+version: 2
+
+sources:
+  - name: gis
+    schema: gis 
+    description: |
+      Raw GIS boundary data for South Sudan administrative levels.
+      Sources: OCHA/COD, UNHCR, or national statistics.
+    
+    tables:
+      - name: state_boundary
+        description: |
+          State (admin level 1) boundaries for South Sudan.
+          10 states with geometry and metadata.
+        columns:
+          - name: adm1_pcode
+            description: State code (e.g., SS01)
+          - name: adm1_name
+            description: State name
+          - name: adm1_ref_name
+            description: Reference state name (preferred)
+          - name: geometry
+            description: Polygon geometry for the state
+          - name: center_lat
+            description: Center point latitude
+          - name: center_lon
+            description: Center point longitude
+          - name: area_sqkm
+            description: Area in square kilometers
+            
+      - name: county_boundary
+        description: |
+          County (admin level 2) boundaries for South Sudan.
+          79 counties with geometry and state associations.
+        columns:
+          - name: adm2_pcode
+            description: County code
+          - name: adm2_name
+            description: County name
+          - name: adm2_ref_name
+            description: Reference county name (preferred)
+          - name: adm1_pcode
+            description: Parent state code
+          - name: adm1_name
+            description: Parent state name
+          - name: geometry
+            description: Polygon geometry for the county
+          - name: center_lat
+            description: Center point latitude
+          - name: center_lon
+            description: Center point longitude
+          - name: area_sqkm
+            description: Area in square kilometers
+            
+      - name: country_boundary
+        description: |
+          Country (admin level 0) boundary for South Sudan.
+          Single record with national geometry.
+        columns:
+          - name: adm0_pcode
+            description: Country code (SS)
+          - name: adm0_name
+            description: Country name
+          - name: geometry
+            description: National polygon geometry
+          - name: center_lat
+            description: Center point latitude
+          - name: center_lon
+            description: Center point longitude
+          - name: area_sqkm
+            description: Area in square kilometers

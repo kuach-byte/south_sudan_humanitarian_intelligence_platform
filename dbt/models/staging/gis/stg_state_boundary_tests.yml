@@ -1,0 +1,44 @@
+# models/staging/gis/stg_state_boundary_tests.yml
+# QA tests for state boundary staging model
+
+version: 2
+
+# Note: The model is defined in stg_state_boundary.yml
+# This file ONLY contains additional tests
+
+tests:
+  - name: state_boundary_row_count_unchanged
+    description: "Verify row count matches source"
+    config:
+      severity: warn
+    model: stg_state_boundary
+    test: dbt_utils.equal_rowcount
+    args:
+      compare_model: source('gis', 'state_boundary')
+
+  - name: state_code_format_valid
+    description: "All state codes follow SS## pattern"
+    config:
+      severity: warn
+    model: stg_state_boundary
+    test: dbt_utils.expression_is_true
+    args:
+      expression: "state_code ~ '^SS[0-9]{2}$'"
+
+  - name: geometry_valid
+    description: "All geometries are valid"
+    config:
+      severity: warn
+    model: stg_state_boundary
+    test: dbt_utils.expression_is_true
+    args:
+      expression: "st_isvalid(geometry)"
+
+  - name: center_point_within_geometry
+    description: "Center point falls within the geometry"
+    config:
+      severity: warn
+    model: stg_state_boundary
+    test: dbt_utils.expression_is_true
+    args:
+      expression: "st_contains(geometry, st_setsrid(st_makepoint(center_lon, center_lat), 4326))"

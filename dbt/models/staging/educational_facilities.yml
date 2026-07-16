@@ -1,0 +1,193 @@
+version: 2
+
+# ------------------------------------------------------------------
+# Source: raw table as loaded into Postgres (raw_data schema)
+# Connection is driven by env vars in profiles.yml:
+#   DB_HOST=localhost  DB_PORT=5432  DB_NAME=humanitarian_db
+#   DB_USER=postgres   DB_PASSWORD=kuach  DB_SCHEMA=raw_data
+# ------------------------------------------------------------------
+sources:
+  - name: cleaned_data
+    database: "{{ env_var('DB_NAME', 'humanitarian_db') }}"
+    schema: "{{ env_var('DB_SCHEMA', 'cleaned_data') }}"
+    description: >
+      Raw, as-loaded humanitarian reference/GIS tables before any staging
+      cleaning is applied.
+    tables:
+      - name: education_facilities
+        description: >
+          South Sudan education facility reference table (schools, colleges,
+          universities, kindergartens) with a 3-level administrative
+          hierarchy (adm1/adm2/adm3) and a geometry column. 438 rows,
+          0 duplicate rows, primary key `id` fully populated.
+        loaded_at_field: null
+        columns:
+          - name: id
+            description: OSM-style source identifier (e.g. 'way/974164633'). Primary key.
+            tests:
+              - unique
+              - not_null
+          - name: name
+            description: Facility name in original script/casing.
+            tests:
+              - not_null
+          - name: amenity
+            description: >
+              Raw facility category. 5 distinct values incl. NULL
+              (school, college, university, kindergarten, NULL — 3.9% missing).
+          - name: adm1_pcode
+            description: Level-1 administrative P-code (e.g. SS01).
+            tests:
+              - not_null
+          - name: adm1_name
+            description: Level-1 administrative name (e.g. Central Equatoria).
+            tests:
+              - not_null
+          - name: adm2_pcode
+            description: Level-2 administrative P-code (e.g. SS0101).
+            tests:
+              - not_null
+          - name: adm2_name
+            description: Level-2 administrative name (e.g. Juba).
+            tests:
+              - not_null
+          - name: adm3_pcode
+            description: Level-3 administrative P-code (e.g. SS010106).
+            tests:
+              - not_null
+          - name: adm3_name
+            description: Level-3 administrative name (e.g. Kator).
+            tests:
+              - not_null
+          - name: name_latin
+            description: Latin-script transliteration of `name`.
+            tests:
+              - not_null
+          - name: geometry
+            description: Raw WKB/EWKB geometry text (point or polygon), SRID embedded.
+            tests:
+              - not_null
+
+# ------------------------------------------------------------------
+# Staging model docs + generic tests
+# ------------------------------------------------------------------
+models:
+  - name: educational_facilities
+    description: |
+      Cleaned, GIS-ready staging view over raw_data.education_facilities.
+      Materialized as a VIEW in cleaned_data.educational_facilities.
+
+      Cleaning scope, per the source data-profiling summary:
+
+      - Layer 1 (Structural): primary key is already unique/non-null in the
+        source, so it's carried through with no transformation.
+      - Layer 2 (Text cleaning): trims whitespace, strips invisible unicode
+        characters (zero-width space, BOM, NBSP), and collapses internal
+        whitespace. Casing of facility_name / facility_name_latin is
+        deliberately PRESERVED — these are proper nouns, and acronyms such
+        as SOS/USAID/UNICEF would be damaged by title-casing.
+      - Layer 3 (Amenity standardization): lowercased/trimmed into a closed
+        4-value domain (school, college, university, kindergarten); missing
+        values (3.9% in source) are kept as true NULL rather than guessed.
+      - Layer 4 (Geographic validation): raw WKB text is cast to `geometry`
+        once, SRID and geometry type are surfaced, and invalid geometries
+        are repaired with ST_MakeValid (flagged via
+        was_geometry_valid_before_repair for lineage).
+      - Layers 5-6 (business validation — duplicate facilities, admin
+        code<->name consistency, derived metrics) are intentionally NOT
+        transformed away in this model. They're enforced as tests instead
+        (see the generic tests below and the singular test file), so bad
+        data fails the build loudly rather than being silently "fixed".
+
+      Administrative name casing (adm1/adm2/adm3_name) was left as trim +
+      whitespace-collapse only, since profiling showed a single consistent
+      casing per value already — no case-normalization was needed.
+    columns:
+      - name: facility_id
+        description: Cleaned primary key, carried through from source `id`.
+        tests:
+          - unique
+          - not_null
+
+      - name: facility_name
+        description: >
+          Facility name with whitespace/invisible characters normalized.
+          Casing is intentionally preserved (proper nouns / acronyms).
+        tests:
+          - not_null
+
+      - name: facility_name_latin
+        description: Latin-script name, same normalization as facility_name.
+        tests:
+          - not_null
+
+      - name: amenity_type
+        description: >
+          Standardized (lowercased) facility category. NULL where the source
+          amenity value was missing — not guessed or imputed.
+        tests:
+          - accepted_values:
+              values: ['school', 'college', 'university', 'kindergarten']
+              config:
+                severity: warn
+                where: "amenity_type is not null"
+
+      - name: adm1_pcode
+        description: >
+          Level-1 administrative P-code. One-to-one mapping with adm1_name
+          is enforced by the singular test (not expressible as a generic test).
+        tests:
+          - not_null
+
+      - name: adm1_name
+        description: Level-1 administrative name, whitespace-normalized.
+        tests:
+          - not_null
+
+      - name: adm2_pcode
+        description: Level-2 administrative P-code.
+        tests:
+          - not_null
+
+      - name: adm2_name
+        description: Level-2 administrative name, whitespace-normalized.
+        tests:
+          - not_null
+
+      - name: adm3_pcode
+        description: Level-3 administrative P-code.
+        tests:
+          - not_null
+
+      - name: adm3_name
+        description: Level-3 administrative name, whitespace-normalized.
+        tests:
+          - not_null
+
+      - name: geometry
+        description: >
+          PostGIS geometry, repaired with ST_MakeValid where the source
+          geometry was invalid.
+        tests:
+          - not_null
+
+      - name: geometry_srid
+        description: Spatial reference identifier extracted from the geometry (expected 4326).
+        tests:
+          - accepted_values:
+              values: [4326]
+              config:
+                severity: warn
+
+      - name: geometry_type
+        description: PostGIS geometry type (POINT, POLYGON, MULTIPOLYGON, ...).
+        tests:
+          - accepted_values:
+              values: ['ST_Point', 'ST_Polygon', 'ST_MultiPolygon']
+              config:
+                severity: warn
+
+      - name: was_geometry_valid_before_repair
+        description: >
+          Boolean flag — false means ST_MakeValid was applied to this row's
+          geometry. Kept for auditability rather than silently discarded.

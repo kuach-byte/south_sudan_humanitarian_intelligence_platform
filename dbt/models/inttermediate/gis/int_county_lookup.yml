@@ -1,0 +1,103 @@
+# models/intermediate/gis/int_county_lookup.yml
+version: 2
+
+models:
+  - name: int_county_lookup
+    description: |
+      Authoritative county reference table derived from GIS boundaries.
+      This is the single source of truth for county names across all datasets.
+      
+      Contains 79 counties with their codes, names, and parent state associations.
+      Note: SS00 (Abyei Administrative Area) is a special case that doesn't map
+      to a standard state but is kept for completeness.
+      
+    config:
+      schema: intermediate
+      materialized: table
+      tags: ['gis', 'reference', 'lookup']
+      
+    columns:
+      - name: county_code
+        description: |
+          Unique administrative code for the county (e.g., SS0101, SS0201).
+          Primary key for joining to facility and other datasets.
+        tests:
+          - not_null
+          - unique
+          - dbt_utils.not_empty_string
+          
+      - name: county_name
+        description: |
+          Canonical county name from the GIS reference name field.
+          This is the authoritative name to use across all datasets.
+        tests:
+          - not_null
+          - dbt_utils.not_empty_string
+          
+      - name: state_code
+        description: |
+          Parent state administrative code (e.g., SS01).
+          Foreign key to int_state_lookup.state_code.
+          Note: SS00 is a special case (Abyei Administrative Area) that
+          does not have a corresponding entry in int_state_lookup.
+        tests:
+          - not_null
+          - dbt_utils.not_empty_string
+          - relationships:
+              to: ref('int_state_lookup')
+              field: state_code
+              where: "state_code != 'SS00'"  # Exclude Abyei special case
+              severity: warn  # Warn instead of fail for special cases
+              
+      - name: state_name
+        description: Parent state name from the county boundary table.
+        tests:
+          - not_null
+          - dbt_utils.not_empty_string
+          
+      - name: country_code
+        description: ISO country code (always 'SS' for South Sudan)
+        tests:
+          - not_null
+          - accepted_values:
+              values: ['SS']
+              
+      - name: country_name
+        description: Full country name ('South Sudan')
+        tests:
+          - not_null
+          - accepted_values:
+              values: ['South Sudan']
+              
+      - name: geometry
+        description: |
+          Spatial geometry (polygon) representing the county boundary.
+          Kept for potential spatial operations.
+        tests:
+          - not_null
+          
+      - name: center_lat
+        description: Latitude of the county's geographic center
+        tests:
+          - not_null
+          
+      - name: center_lon
+        description: Longitude of the county's geographic center
+        tests:
+          - not_null
+          
+      - name: version
+        description: Version of the GIS data (e.g., 'v03')
+        
+      - name: valid_on
+        description: Date when this boundary became effective
+        
+      - name: valid_to
+        description: |
+          Date when this boundary expires.
+          NULL indicates currently valid boundary.
+          
+      - name: _staged_at
+        description: Timestamp when the record was staged
+        tests:
+          - not_null

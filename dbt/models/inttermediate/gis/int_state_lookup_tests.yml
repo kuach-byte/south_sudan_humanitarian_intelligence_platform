@@ -1,0 +1,48 @@
+# models/intermediate/gis/int_state_lookup_tests.yml
+# Additional QA tests for state lookup
+
+version: 2
+
+tests:
+  - name: state_count_unchanged
+    description: "Verify number of states matches staging model"
+    config:
+      severity: warn
+    model: int_state_lookup
+    test: dbt_utils.equal_rowcount
+    args:
+      compare_model: ref('stg_state_boundary')
+      
+  - name: state_code_format_valid
+    description: "All state codes follow SS## pattern"
+    config:
+      severity: warn
+    model: int_state_lookup
+    test: dbt_utils.expression_is_true
+    args:
+      expression: "state_code ~ '^SS[0-9]{2}$'"
+      
+  - name: all_state_names_are_title_case
+    description: "All state names are properly capitalized"
+    config:
+      severity: warn
+    model: int_state_lookup
+    test: dbt_utils.expression_is_true
+    args:
+      expression: "state_name = initcap(state_name)"
+      
+  - name: no_empty_geometry
+    description: "All states have valid geometry"
+    model: int_state_lookup
+    test: dbt_utils.expression_is_true
+    args:
+      expression: "st_isvalid(geometry)"
+      
+  - name: center_point_within_state
+    description: "Center point falls within the state geometry"
+    config:
+      severity: warn
+    model: int_state_lookup
+    test: dbt_utils.expression_is_true
+    args:
+      expression: "st_contains(geometry, st_setsrid(st_makepoint(center_lon, center_lat), 4326))"

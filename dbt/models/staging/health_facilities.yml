@@ -1,0 +1,160 @@
+version: 2
+
+sources:
+  - name: cleaned_data
+    database: "{{ env_var('DB_NAME', 'humanitarian_db') }}"
+    schema: "{{ env_var('DB_SCHEMA', 'cleaned_data') }}"
+    description: Raw health facility reference data.
+    tables:
+      - name: health_facilities
+        description: >
+          South Sudan health facilities reference table with state/county/payam
+          hierarchy and coordinates. 1,988 rows, 0 duplicates.
+        columns:
+          - name: state
+            description: State name.
+            tests:
+              - not_null
+          - name: state_code
+            description: State code.
+            tests:
+              - not_null
+          - name: county
+            description: County name.
+            tests:
+              - not_null
+          - name: county_code
+            description: County code.
+            tests:
+              - not_null
+          - name: payam
+            description: Payam name. 1.2% missing.
+          - name: payam_code
+            description: Payam code. 1.5% missing.
+          - name: facility_name
+            description: Facility name.
+            tests:
+              - not_null
+          - name: latitude
+            description: Latitude coordinate. 5.7% missing.
+          - name: longitude
+            description: Longitude coordinate. 5.7% missing.
+          - name: missing_coordinates
+            description: Boolean flag for missing coordinates.
+
+models:
+  - name: health_facilities
+    description: |
+      Cleaned staging view for health facilities. Materialized as VIEW in
+      staging.health_facilities.
+      
+      Key transformations:
+      - Facility hash: MD5(name + payam_code + county_code) for entity resolution
+      - Text standardization: lowercase for admin names, trim whitespace
+      - Canonical admin names from GIS lookup tables (int_state_lookup, int_county_lookup)
+      - Raw admin names preserved for QA (state_raw, county_raw, payam_raw)
+      - Coordinate quality flag: VALID/MISSING/SUSPICIOUS
+      - Completeness score: 0-100 based on admin + coordinate presence
+      - Location confidence: HIGH/MEDIUM/LOW
+    columns:
+      - name: facility_hash
+        description: Stable hash key for facility entity resolution.
+        tests:
+          - unique
+          - not_null
+
+      - name: facility_name
+        description: Cleaned facility name.
+        tests:
+          - not_null
+
+      - name: state
+        description: |
+          Canonical state name from GIS lookup.
+          Falls back to cleaned raw state if no lookup match.
+        tests:
+          - not_null
+
+      - name: state_code
+        description: State code.
+        tests:
+          - not_null
+
+      - name: county
+        description: |
+          Canonical county name from GIS lookup.
+          Falls back to cleaned raw county if no lookup match.
+        tests:
+          - not_null
+
+      - name: county_code
+        description: County code.
+        tests:
+          - not_null
+
+      - name: payam
+        description: Cleaned payam name (not yet canonicalized).
+
+      - name: payam_code
+        description: Payam code.
+
+      - name: state_raw
+        description: Original raw state name (preserved for QA).
+        tests:
+          - not_null
+
+      - name: county_raw
+        description: Original raw county name (preserved for QA).
+        tests:
+          - not_null
+
+      - name: payam_raw
+        description: Original raw payam name (preserved for QA).
+
+      - name: has_valid_state_code
+        description: |
+          TRUE if state_code exists in int_state_lookup.
+          Special case: SS00 (Abyei) is considered valid.
+        tests:
+          - not_null
+
+      - name: has_valid_county_code
+        description: TRUE if county_code exists in int_county_lookup.
+        tests:
+          - not_null
+
+      - name: latitude
+        description: Latitude coordinate.
+
+      - name: longitude
+        description: Longitude coordinate.
+
+      - name: coordinate_quality
+        description: |
+          VALID - within South Sudan bounds (lat:3-13, lon:24-36)
+          MISSING - null coordinates
+          SUSPICIOUS - outside expected bounds
+        tests:
+          - accepted_values:
+              values: ['VALID', 'MISSING', 'SUSPICIOUS']
+              config:
+                severity: warn
+
+      - name: completeness_score
+        description: |
+          Score 0-100 based on data completeness:
+          - coordinates: 40pts
+          - payam_code: 30pts
+          - county_code: 20pts
+          - state_code: 10pts
+
+      - name: location_confidence
+        description: |
+          HIGH - score >=90 + valid coordinates
+          MEDIUM - score >=60
+          LOW - score <60
+        tests:
+          - accepted_values:
+              values: ['HIGH', 'MEDIUM', 'LOW']
+              config:
+                severity: warn

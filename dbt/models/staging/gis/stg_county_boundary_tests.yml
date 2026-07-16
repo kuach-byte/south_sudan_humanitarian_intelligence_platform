@@ -1,0 +1,74 @@
+# models/staging/gis/stg_county_boundary_tests.yml
+# QA tests for county boundary staging model
+
+version: 2
+
+# Note: The model is defined in stg_county_boundary.yml
+# This file ONLY contains additional tests
+
+tests:
+  - name: county_boundary_row_count_unchanged
+    description: "Verify row count matches source"
+    config:
+      severity: warn
+    model: stg_county_boundary
+    test: dbt_utils.equal_rowcount
+    args:
+      compare_model: source('gis', 'county_boundary')
+
+  - name: county_code_format_valid
+    description: "All county codes follow SS#### pattern"
+    config:
+      severity: warn
+    model: stg_county_boundary
+    test: dbt_utils.expression_is_true
+    args:
+      expression: "county_code ~ '^SS[0-9]{4}$'"
+
+  - name: state_code_valid
+    description: "All state codes reference valid states (SS01-SS10)"
+    config:
+      severity: warn
+    model: stg_county_boundary
+    test: dbt_utils.expression_is_true
+    args:
+      expression: "state_code in ('SS01', 'SS02', 'SS03', 'SS04', 'SS05', 'SS06', 'SS07', 'SS08', 'SS09', 'SS10')"
+
+  - name: all_states_have_counties
+    description: "All 10 states have at least one county"
+    config:
+      severity: warn
+    model: stg_county_boundary
+    test: dbt_utils.expression_is_true
+    args:
+      expression: "(select count(distinct state_code) from {{ ref('stg_county_boundary') }}) = 10"
+
+  - name: geometry_valid
+    description: "All geometries are valid"
+    config:
+      severity: warn
+    model: stg_county_boundary
+    test: dbt_utils.expression_is_true
+    args:
+      expression: "st_isvalid(geometry)"
+
+  - name: center_point_within_geometry
+    description: "Center point falls within the geometry"
+    config:
+      severity: warn
+    model: stg_county_boundary
+    test: dbt_utils.expression_is_true
+    args:
+      expression: "st_contains(geometry, st_setsrid(st_makepoint(center_lon, center_lat), 4326))"
+
+  - name: county_area_less_than_state
+    description: "County area should be less than or equal to parent state area"
+    config:
+      severity: warn
+    model: stg_county_boundary
+    test: dbt_utils.expression_is_true
+    args:
+      expression: |
+        c.area_sqkm <= s.area_sqkm
+        left join {{ ref('stg_state_boundary') }} s
+        on c.state_code = s.state_code

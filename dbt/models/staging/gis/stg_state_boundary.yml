@@ -1,0 +1,107 @@
+# models/staging/gis/stg_state_boundary.yml
+version: 2
+
+models:
+  - name: stg_state_boundary
+    description: |
+      Staging model for South Sudan state boundary GIS data.
+      Contains 10 states with their spatial geometries and administrative codes.
+      This is a reference table used to validate and enrich facility data.
+      
+    config:
+      schema: staging
+      materialized: view
+      tags: ['gis', 'staging', 'reference']
+      
+    columns:
+      - name: state_code
+        description: |
+          Unique administrative code for the state (e.g., SS01, SS02).
+          Primary key for state lookups.
+        tests:
+          - not_null
+          - unique
+          - dbt_utils.not_empty_string
+          
+      - name: state_name
+        description: |
+          Canonical state name from the reference name field.
+          Preferred name for joining and display.
+        tests:
+          - not_null
+          - dbt_utils.not_empty_string
+          
+      - name: state_name_alt
+        description: |
+          Alternative state name (adm1_name field).
+          May contain slight variations; kept for QA purposes.
+          
+      - name: country_code
+        description: ISO country code (always 'SS' for South Sudan)
+        tests:
+          - not_null
+          - accepted_values:
+              values: ['SS']
+              arguments:
+                severity: warn
+              
+      - name: country_name
+        description: Full country name ('South Sudan')
+        tests:
+          - not_null
+          - accepted_values:
+              values: ['South Sudan']
+              arguments:
+                severity: warn
+              
+      - name: geometry
+        description: |
+          Spatial geometry (polygon) representing the state boundary.
+          Stored as GEOMETRY type for spatial operations.
+        tests:
+          - not_null
+          - dbt_utils.not_empty_string
+          
+      - name: center_lat
+        description: Latitude of the state's geographic center
+        tests:
+          - not_null
+          - dbt_utils.accepted_range:
+              min_value: 0
+              max_value: 15
+              arguments:
+                severity: warn
+              
+      - name: center_lon
+        description: Longitude of the state's geographic center
+        tests:
+          - not_null
+          - dbt_utils.accepted_range:
+              min_value: 20
+              max_value: 40
+              arguments:
+                severity: warn
+              
+      - name: area_sqkm
+        description: Area of the state in square kilometers
+        
+      - name: version
+        description: Version of the GIS data (e.g., 'v03')
+        
+      - name: language
+        description: Language code for the name fields (usually 'en')
+        
+      - name: valid_on
+        description: Date when this boundary became effective
+        
+      - name: valid_to
+        description: |
+          Date when this boundary expires.
+          NULL indicates currently valid boundary.
+          
+      - name: _staged_at
+        description: |
+          Timestamp when the record was staged.
+          System-generated for audit purposes.
+        tests:
+          - not_null

@@ -1,0 +1,93 @@
+# models/intermediate/gis/int_county_lookup_tests.yml
+# Additional QA tests for county lookup
+
+version: 2
+
+tests:
+  - name: county_count_unchanged
+    description: "Verify number of counties matches staging model"
+    config:
+      severity: warn
+    model: int_county_lookup
+    test: dbt_utils.equal_rowcount
+    args:
+      compare_model: ref('stg_county_boundary')
+      
+  - name: county_code_format_valid
+    description: "All county codes follow SS#### pattern"
+    config:
+      severity: warn
+    model: int_county_lookup
+    test: dbt_utils.expression_is_true
+    args:
+      expression: "county_code ~ '^SS[0-9]{4}$'"
+      
+  - name: all_county_names_are_title_case
+    description: "All county names are properly capitalized"
+    config:
+      severity: warn
+    model: int_county_lookup
+    test: dbt_utils.expression_is_true
+    args:
+      expression: "county_name = initcap(county_name)"
+      
+  - name: all_states_have_counties
+    description: "All 10 states have at least one county"
+    config:
+      severity: warn
+    model: int_county_lookup
+    test: dbt_utils.expression_is_true
+    args:
+      expression: "(select count(distinct state_code) from {{ ref('int_county_lookup') }} where state_code != 'SS00') = 10"
+      
+  - name: only_one_special_state_code
+    description: "There should be exactly one county with SS00 (Abyei)"
+    config:
+      severity: warn
+    model: int_county_lookup
+    test: dbt_utils.expression_is_true
+    args:
+      expression: "(select count(*) from {{ ref('int_county_lookup') }} where state_code = 'SS00') = 1"
+      
+  - name: no_empty_geometry
+    description: "All counties have valid geometry"
+    model: int_county_lookup
+    test: dbt_utils.expression_is_true
+    args:
+      expression: "st_isvalid(geometry)"
+      
+  - name: center_point_within_county
+    description: "Center point falls within the county geometry"
+    config:
+      severity: warn
+    model: int_county_lookup
+    test: dbt_utils.expression_is_true
+    args:
+      expression: "st_contains(geometry, st_setsrid(st_makepoint(center_lon, center_lat), 4326))"
+      
+  - name: county_area_less_than_state
+    description: "Each county area is less than or equal to its parent state area"
+    config:
+      severity: warn
+    model: int_county_lookup
+    test: dbt_utils.expression_is_true
+    args:
+      expression: |
+        c.area_sqkm <= s.area_sqkm
+        from {{ ref('int_county_lookup') }} c
+        left join {{ ref('int_state_lookup') }} s
+        on c.state_code = s.state_code
+        where c.state_code != 'SS00'  -- Exclude Abyei
+      
+  - name: special_case_state_code_has_no_state_lookup
+    description: "SS00 (Abyei) should not exist in state lookup (by design)"
+    config:
+      severity: warn
+    model: int_county_lookup
+    test: dbt_utils.expression_is_true
+    args:
+      expression: |
+        not exists (
+          select 1 from {{ ref('int_state_lookup') }} 
+          where state_code = 'SS00'
+        )

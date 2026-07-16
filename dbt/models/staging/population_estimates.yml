@@ -1,0 +1,357 @@
+version: 2
+
+# ------------------------------------------------------------------
+# Source: population_estimates_2024_clean table
+# Connection driven by env vars in profiles.yml
+# ------------------------------------------------------------------
+sources:
+  - name: cleaned_data
+    database: "{{ env_var('DB_NAME', 'humanitarian_db') }}"
+    schema: "{{ env_var('DB_SCHEMA', 'cleaned_data') }}"
+    description: Raw population estimates data before staging cleaning.
+    tables:
+      - name: population_estimates_2024_clean
+        description: >
+          South Sudan population estimates at admin2 level for 2025.
+          80 rows, 1 country-level aggregate, 79 admin2 units.
+          Population estimates are from the UN World Population Prospects
+          and South Sudan National Bureau of Statistics (2024).
+        columns:
+          - name: admin1
+            description: State/administrative level 1 name.
+          - name: admin1_pcode
+            description: State/administrative level 1 P-code.
+          - name: admin2
+            description: County/administrative level 2 name.
+          - name: admin2_pcode
+            description: County/administrative level 2 P-code.
+          - name: population_2025
+            description: Total population estimate for 2025.
+            tests:
+              - not_null
+          - name: pct_male_under_5
+            description: Proportion of male population under 5 years.
+          - name: male_under_5
+            description: Estimated male population under 5 years.
+            tests:
+              - not_null
+          - name: pct_female_under_5
+            description: Proportion of female population under 5 years.
+          - name: female_under_5
+            description: Estimated female population under 5 years.
+            tests:
+              - not_null
+          - name: pct_male_5_17
+            description: Proportion of male population aged 5-17 years.
+          - name: male_5_17
+            description: Estimated male population aged 5-17 years.
+            tests:
+              - not_null
+          - name: pct_female_5_17
+            description: Proportion of female population aged 5-17 years.
+          - name: female_5_17
+            description: Estimated female population aged 5-17 years.
+            tests:
+              - not_null
+          - name: pct_male_18_60
+            description: Proportion of male population aged 18-60 years.
+          - name: male_18_60
+            description: Estimated male population aged 18-60 years.
+            tests:
+              - not_null
+          - name: pct_female_18_60
+            description: Proportion of female population aged 18-60 years.
+          - name: female_18_60
+            description: Estimated female population aged 18-60 years.
+            tests:
+              - not_null
+          - name: pct_male_over_60
+            description: Proportion of male population over 60 years.
+          - name: male_over_60
+            description: Estimated male population over 60 years.
+            tests:
+              - not_null
+          - name: pct_female_over_60
+            description: Proportion of female population over 60 years.
+          - name: female_over_60
+            description: Estimated female population over 60 years.
+            tests:
+              - not_null
+
+# ------------------------------------------------------------------
+# Staging model docs + generic tests
+# ------------------------------------------------------------------
+models:
+  - name: population_estimates
+    description: |
+      Cleaned, validated staging view for population estimates at admin2 level.
+      Materialized as a VIEW in staging.population_estimates.
+
+      This is a REFERENCE dataset (dimension-like) that serves as the foundation
+      for all population-based analytics in the project.
+
+      **Transformation Scope:**
+
+      - **Standardization:** Text trimming, upper-case P-codes, NULL handling
+      - **Surrogate Key:** population_sk generated from admin2_pcode for entity
+        resolution
+      - **Country Aggregate Flag:** is_country_total identifies the single row
+        that represents South Sudan total (has no admin codes)
+      - **Type Casting:** Numeric columns cast to appropriate precision
+        (numeric(18,2) for counts, numeric(8,6) for percentages)
+      - **Derived Aggregates:** child, working-age, and elderly aggregates
+      - **Derived Ratios:** dependency ratios and working-age ratio
+      - **Record Type Meta-field:** COUNTRY_TOTAL, ADMIN2_LEVEL, or
+        INCOMPLETE_ADMIN for data quality monitoring
+
+      **Key Design Decisions:**
+
+      - Percentages are NOT rounded or normalized to sum to 1.0
+      - Statistical outliers are NOT corrected or imputed
+      - The country aggregate row is preserved and flagged, not removed
+      - Population estimates remain faithful to the source model
+
+      **Downstream Use Cases:**
+
+      - JIAF indicator denominator (population at risk)
+      - Health facility to population ratios
+      - Education facility coverage rates
+      - Humanitarian needs estimation
+      - Beneficiary targeting and project planning
+    columns:
+      - name: population_sk
+        description: >
+          Surrogate key generated from admin2_pcode using MD5 hash.
+          Stable key for entity resolution across datasets.
+        tests:
+          - unique
+          - not_null
+
+      - name: admin1
+        description: State/administrative level 1 name, cleaned. NULL only for country total row.
+        tests:
+          - dbt_utils.not_null_proportion:
+              at_least: 0.98  # Allow the country total row to be NULL
+
+      - name: admin1_pcode
+        description: State/administrative level 1 P-code, standardized to uppercase. NULL only for country total row.
+        tests:
+          - dbt_utils.not_null_proportion:
+              at_least: 0.98
+
+      - name: admin2
+        description: County/administrative level 2 name, cleaned. NULL only for country total row.
+        tests:
+          - dbt_utils.not_null_proportion:
+              at_least: 0.98
+
+      - name: admin2_pcode
+        description: >
+          County/administrative level 2 P-code, standardized to uppercase.
+          Business key for the model. NULL only for country total row.
+        tests:
+          - dbt_utils.not_null_proportion:
+              at_least: 0.98
+
+      - name: is_country_total
+        description: >
+          Boolean flag identifying the single row representing South Sudan total
+          population (where both admin1_pcode and admin2_pcode are NULL).
+          Useful for filtering out the aggregate row when joining to admin units.
+
+      - name: population_2025
+        description: Total population estimate for 2025 (projected).
+        tests:
+          - not_null
+
+      - name: male_under_5
+        description: Estimated male population younger than 5 years.
+        tests:
+          - not_null
+
+      - name: female_under_5
+        description: Estimated female population younger than 5 years.
+        tests:
+          - not_null
+
+      - name: male_5_17
+        description: Estimated male population aged 5 to 17 years.
+        tests:
+          - not_null
+
+      - name: female_5_17
+        description: Estimated female population aged 5 to 17 years.
+        tests:
+          - not_null
+
+      - name: male_18_60
+        description: Estimated male population aged 18 to 60 years.
+        tests:
+          - not_null
+
+      - name: female_18_60
+        description: Estimated female population aged 18 to 60 years.
+        tests:
+          - not_null
+
+      - name: male_over_60
+        description: Estimated male population over 60 years.
+        tests:
+          - not_null
+
+      - name: female_over_60
+        description: Estimated female population over 60 years.
+        tests:
+          - not_null
+
+      - name: pct_male_under_5
+        description: Proportion of population that is male and under 5 years.
+        tests:
+          - dbt_utils.accepted_range:
+              arguments:
+                min_value: 0.0
+                max_value: 1.0
+              config:
+                severity: warn
+
+      - name: pct_female_under_5
+        description: Proportion of population that is female and under 5 years.
+        tests:
+          - dbt_utils.accepted_range:
+              arguments:
+                min_value: 0.0
+                max_value: 1.0
+              config:
+                severity: warn
+
+      - name: pct_male_5_17
+        description: Proportion of population that is male and aged 5-17 years.
+        tests:
+          - dbt_utils.accepted_range:
+              arguments:
+                min_value: 0.0
+                max_value: 1.0
+              config:
+                severity: warn
+
+      - name: pct_female_5_17
+        description: Proportion of population that is female and aged 5-17 years.
+        tests:
+          - dbt_utils.accepted_range:
+              arguments:
+                min_value: 0.0
+                max_value: 1.0
+              config:
+                severity: warn
+
+      - name: pct_male_18_60
+        description: Proportion of population that is male and aged 18-60 years.
+        tests:
+          - dbt_utils.accepted_range:
+              arguments:
+                min_value: 0.0
+                max_value: 1.0
+              config:
+                severity: warn
+
+      - name: pct_female_18_60
+        description: Proportion of population that is female and aged 18-60 years.
+        tests:
+          - dbt_utils.accepted_range:
+              arguments:
+                min_value: 0.0
+                max_value: 1.0
+              config:
+                severity: warn
+
+      - name: pct_male_over_60
+        description: Proportion of population that is male and over 60 years.
+        tests:
+          - dbt_utils.accepted_range:
+              arguments:
+                min_value: 0.0
+                max_value: 1.0
+              config:
+                severity: warn
+
+      - name: pct_female_over_60
+        description: Proportion of population that is female and over 60 years.
+        tests:
+          - dbt_utils.accepted_range:
+              arguments:
+                min_value: 0.0
+                max_value: 1.0
+              config:
+                severity: warn
+
+      - name: children_under_5
+        description: Derived total population under 5 years (male + female).
+        tests:
+          - not_null
+
+      - name: children_5_17
+        description: Derived total population aged 5-17 years (male + female).
+        tests:
+          - not_null
+
+      - name: working_age_population
+        description: >
+          Derived total population aged 18-60 years (male + female).
+          Represents the working age / productive population segment.
+        tests:
+          - not_null
+
+      - name: elderly_population
+        description: Derived total population over 60 years (male + female).
+        tests:
+          - not_null
+
+      - name: male_population
+        description: Derived total male population (sum of all male age groups).
+        tests:
+          - not_null
+
+      - name: female_population
+        description: Derived total female population (sum of all female age groups).
+        tests:
+          - not_null
+
+      - name: dependency_ratio
+        description: >
+          Dependency ratio = (children_under_5 + elderly_population) /
+          working_age_population. Higher ratios indicate more dependents
+          per working-age person. NULL for country total row.
+
+      - name: child_dependency_ratio
+        description: >
+          Child dependency ratio = (children_under_5 + children_5_17) /
+          working_age_population. Focuses on young dependents.
+
+      - name: elderly_dependency_ratio
+        description: >
+          Elderly dependency ratio = elderly_population /
+          working_age_population. Focuses on older dependents.
+
+      - name: working_age_ratio
+        description: >
+          Working age ratio = working_age_population / population_2025.
+          Percentage of total population in the working age bracket.
+
+      - name: record_type
+        description: >
+          Data quality metadata field classifying each row:
+          - 'COUNTRY_TOTAL': The South Sudan aggregate row
+          - 'ADMIN2_LEVEL': Standard admin2-level population record
+          - 'INCOMPLETE_ADMIN': Records with missing admin codes
+        tests:
+          - accepted_values:
+              values: ['COUNTRY_TOTAL', 'ADMIN2_LEVEL', 'INCOMPLETE_ADMIN']
+              config:
+                severity: warn
+
+    # ------------------------------------------------------------------
+    # Generic tests at the model level
+    # ------------------------------------------------------------------
+    tests:
+      - dbt_utils.equal_rowcount:
+          compare_model: source('cleaned_data', 'population_estimates_2024_clean')
