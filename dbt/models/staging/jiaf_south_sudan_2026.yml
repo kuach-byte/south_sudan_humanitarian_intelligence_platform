@@ -1,0 +1,372 @@
+version: 2
+
+# ------------------------------------------------------------------
+# Source: raw JIAF PiN table as loaded into Postgres (raw_data schema).
+# A load-time error stored the true field names in the first data row
+# instead of the header, so physical columns are generic (col_1..col_16,
+# sectoral_pin_number). See model docs below for the full name mapping.
+# ------------------------------------------------------------------
+sources:
+  - name: cleaned_data
+    database: "{{ env_var('DB_NAME', 'humanitarian_db') }}"
+    schema: "{{ env_var('DB_SCHEMA', 'cleaned_data') }}"
+    description: >
+      Raw, as-loaded humanitarian reference/GIS tables before any staging
+      cleaning is applied.
+    tables:
+      - name: jiaf_south_sudan_2026_clean
+        description: >
+          South Sudan JIAF 2026 People-in-Need (PiN) table, broken down by
+          admin1/admin2 and population group, with sectoral PiN figures and
+          an overall severity score. Physical columns are mislabeled
+          (col_1..col_16, sectoral_pin_number) due to a load error that put
+          the real field names in the first data row instead of the header.
+        loaded_at_field: null
+        columns:
+          - name: col_1
+            description: Raw column. True field is "Admin 1" (level-1 admin name).
+          - name: col_2
+            description: Raw column. True field is "Admin 1 P-Code".
+          - name: col_3
+            description: Raw column. True field is "Admin 2" (level-2 admin name).
+          - name: col_4
+            description: Raw column. True field is "Admin 2 P-Code".
+          - name: col_5
+            description: Raw column. True field is "Affected population projection 2026".
+          - name: col_6
+            description: Raw column. True field is "Population Group".
+          - name: sectoral_pin_number
+            description: >
+              Raw column. True field is "CCCM" (sectoral PiN count). Already
+              clean but contains expected missing values.
+          - name: col_7
+            description: Raw column. True field is "Education" (sectoral PiN count).
+          - name: col_8
+            description: Raw column. True field is "Nutrition" (sectoral PiN count).
+          - name: col_9
+            description: Raw column. True field is "Food Security" (sectoral PiN count).
+          - name: col_10
+            description: Raw column. True field is "Health" (sectoral PiN count).
+          - name: col_11
+            description: Raw column. True field is "Overarching Protection" (sectoral PiN count).
+          - name: col_12
+            description: Raw column. True field is "Shelter" (sectoral PiN count).
+          - name: col_13
+            description: Raw column. True field is "WASH" (sectoral PiN count).
+          - name: col_14
+            description: Raw column. True field is "Severity" (bounded severity score).
+          - name: col_15
+            description: Raw column. True field is "Preliminary PiN".
+          - name: col_16
+            description: Raw column. True field is "Final PiN".
+
+# ------------------------------------------------------------------
+# Staging model docs + tests
+# ------------------------------------------------------------------
+models:
+  - name: jiaf_south_sudan_2026
+    description: |
+      Cleaned, analysis-ready staging view over
+      raw_data.jiaf_south_sudan_2026_clean. Materialized as a VIEW in
+      cleaned_data.jiaf_south_sudan_2026_clean.
+
+      Cleaning scope:
+
+      - Header repair: the source's true column names were loaded as the
+        first data row instead of the header (col_1 = 'Admin 1', etc). That
+        row is dropped, and columns are renamed using the fixed, hardcoded
+        col_N -> field-name mapping below (positional, not inferred at
+        runtime, since the physical layout is stable across loads):
+
+          col_1  -> admin_1                          col_11 -> overarching_protection
+          col_2  -> admin_1_p_code                    col_12 -> shelter
+          col_3  -> admin_2                            col_13 -> wash
+          col_4  -> admin_2_p_code                     col_14 -> severity
+          col_5  -> affected_population_projection_2026  col_15 -> preliminary_pin
+          col_6  -> population_group                      col_16 -> final_pin
+          sectoral_pin_number -> cccm
+          col_7 -> education   col_8 -> nutrition   col_9 -> food_security   col_10 -> health
+
+      - Text standardization: known placeholder tokens (N/A, NA, -, Unknown,
+        NULL, empty string, in any casing) are converted to true NULL,
+        whitespace is trimmed and collapsed. Administrative names and
+        population_group are INITCAP'd; P-codes are UPPER'd.
+      - Numeric casting: sectoral PiN, population, and severity columns are
+        comma-stripped and regex-validated before casting to NUMERIC, so an
+        unexpected non-numeric value becomes NULL instead of failing the
+        build. P-codes are intentionally kept as TEXT (identifiers, not
+        quantities).
+      - GIS/administrative validation (adm1 code<->name, adm2 code<->name,
+        adm2 belongs to adm1) is intentionally NOT transformed or repaired
+        in this model. Per source-of-truth policy, mismatches are only
+        flagged, never auto-corrected: p-code *existence* is checked below
+        via `relationships` tests, and p-code<->name / hierarchy
+        *consistency* is checked by the singular test
+        jiaf_south_sudan_2026_admin_hierarchy.sql (a plain relationships
+        test can't express "the name paired with this code is the right
+        one," only "this code exists somewhere in the lookup").
+    tests:
+      # Duplicate detection: catches a county reporting PiN for the same
+      # population group twice, which would double-count people in need.
+      - dbt_utils.unique_combination_of_columns:
+          combination_of_columns:
+            - admin_1_p_code
+            - admin_2_p_code
+            - population_group
+          config:
+            severity: error
+
+      - dbt_utils.expression_is_true:
+                expression: "final_pin is null or affected_population_projection_2026 is null or round(final_pin::numeric, 0) <= round(affected_population_projection_2026::numeric, 0)"
+                config:
+                  severity: error
+
+      # Each sector's PiN is a subset of the total finalized PiN, so no
+      # single sector can report more people in need than the overall total.
+      - dbt_utils.expression_is_true:
+          expression: >
+            final_pin is null or (
+              coalesce(cccm,0) <= final_pin and
+              coalesce(education,0) <= final_pin and
+              coalesce(nutrition,0) <= final_pin and
+              coalesce(food_security,0) <= final_pin and
+              coalesce(health,0) <= final_pin and
+              coalesce(overarching_protection,0) <= final_pin and
+              coalesce(shelter,0) <= final_pin and
+              coalesce(wash,0) <= final_pin
+            )
+          config:
+            severity: error
+
+      # South Sudan admin1/admin2 p-codes follow a fixed SSxx / SSxxxx
+      # shape; anything else signals a cast/parsing error, not real data.
+      - dbt_utils.expression_is_true:
+          expression: "admin_1_p_code ~ '^SS[0-9]{2}$'"
+          config:
+            severity: warn
+      - dbt_utils.expression_is_true:
+          expression: "admin_2_p_code ~ '^SS[0-9]{4}$'"
+          config:
+            severity: warn
+    columns:
+      - name: admin_1
+        description: Level-1 administrative name, INITCAP'd. Code<->name pairing validated by singular test.
+        tests:
+          - dbt_utils.not_null_proportion:
+              arguments:
+                at_least: 0.99
+              config:
+                severity: warn
+
+      - name: admin_1_p_code
+        description: >
+          Level-1 administrative P-code, UPPER'd. Referential existence
+          checked here; code<->name pairing consistency validated by
+          singular test.
+        tests:
+          - dbt_utils.not_null_proportion:
+              arguments:
+                at_least: 0.99
+              config:
+                severity: warn
+          - relationships:
+              to: ref('int_state_lookup')
+              field: state_code
+              config:
+                severity: warn
+
+      - name: admin_2
+        description: Level-2 administrative name, INITCAP'd. Code<->name pairing validated by singular test.
+        tests:
+          - dbt_utils.not_null_proportion:
+              arguments:
+                at_least: 0.99
+              config:
+                severity: warn
+
+      - name: admin_2_p_code
+        description: >
+          Level-2 administrative P-code, UPPER'd. Existence + admin1
+          membership validated below / by singular test.
+        tests:
+          - dbt_utils.not_null_proportion:
+              arguments:
+                at_least: 0.99
+              config:
+                severity: warn
+          - relationships:
+              to: ref('int_county_lookup')
+              field: county_code
+              config:
+                severity: warn
+
+      - name: affected_population_projection_2026
+        description: Projected affected population for 2026. NUMERIC, comma-stripped before cast.
+        tests:
+          # Population counts are inherently non-negative; a negative value
+          # means the cast picked up something that wasn't really a number.
+          - dbt_utils.accepted_range:
+              min_value: 0
+              inclusive: true
+              config:
+                severity: error
+
+
+      - name: population_group
+        description: >
+          Population group category, standardized using INITCAP (for example,
+          IDPs, Returnees, Host Community). No accepted_values test is currently
+          defined because the authoritative list of valid population groups has
+          not yet been confirmed. Introducing one prematurely could reject
+          legitimate values. Add an accepted_values test once the official JIAF
+          coding standard is available.
+        tests:
+          - not_null
+          - dbt_utils.not_null_proportion:
+              arguments:
+                at_least: 0.99
+              config:
+                severity: warn
+
+      - name: cccm
+        description: >
+          CCCM sector PiN count. NUMERIC. Missing values are expected
+          (source column noted as "already clean but contains expected
+          missing values"), so nullability is monitored via
+          not_null_proportion rather than a strict not_null.
+        tests:
+          - dbt_utils.not_null_proportion:
+              arguments:
+                at_least: 0.5
+              config:
+                severity: warn
+
+          - dbt_utils.accepted_range:
+              arguments:
+                min_value: 0
+                inclusive: true
+              config:
+                severity: error
+
+      - name: education
+        description: Education sector PiN count. NUMERIC.
+        tests:
+          - dbt_utils.not_null_proportion:
+              at_least: 0.5
+              config:
+                severity: warn
+          - dbt_utils.accepted_range:
+              min_value: 0
+              inclusive: true
+              config:
+                severity: error
+
+      - name: nutrition
+        description: Nutrition sector PiN count. NUMERIC.
+        tests:
+          - dbt_utils.not_null_proportion:
+              at_least: 0.5
+              config:
+                severity: warn
+          - dbt_utils.accepted_range:
+              min_value: 0
+              inclusive: true
+              config:
+                severity: error
+
+      - name: food_security
+        description: Food Security sector PiN count. NUMERIC.
+        tests:
+          - dbt_utils.not_null_proportion:
+              at_least: 0.5
+              config:
+                severity: warn
+          - dbt_utils.accepted_range:
+              min_value: 0
+              inclusive: true
+              config:
+                severity: error
+
+      - name: health
+        description: Health sector PiN count. NUMERIC.
+        tests:
+          - dbt_utils.not_null_proportion:
+              at_least: 0.5
+              config:
+                severity: warn
+          - dbt_utils.accepted_range:
+              min_value: 0
+              inclusive: true
+              config:
+                severity: error
+
+      - name: overarching_protection
+        description: Overarching Protection sector PiN count. NUMERIC.
+        tests:
+          - dbt_utils.not_null_proportion:
+              at_least: 0.5
+              config:
+                severity: warn
+          - dbt_utils.accepted_range:
+              min_value: 0
+              inclusive: true
+              config:
+                severity: error
+
+      - name: shelter
+        description: Shelter sector PiN count. NUMERIC.
+        tests:
+          - dbt_utils.not_null_proportion:
+              at_least: 0.5
+              config:
+                severity: warn
+          - dbt_utils.accepted_range:
+              min_value: 0
+              inclusive: true
+              config:
+                severity: error
+
+      - name: wash
+        description: WASH sector PiN count. NUMERIC.
+        tests:
+          - dbt_utils.not_null_proportion:
+              at_least: 0.5
+              config:
+                severity: warn
+          - dbt_utils.accepted_range:
+              min_value: 0
+              inclusive: true
+              config:
+                severity: error
+
+      - name: severity
+        description: >
+          Overall severity score. NUMERIC. Range 1-100 assumed from the
+          standard JIAF severity-phase scale (not stated in the source
+          profiling summary) -- confirm before treating range failures as
+          errors, hence severity: warn below.
+        tests:
+          - dbt_utils.accepted_range:
+              min_value: 1
+              max_value: 100
+              inclusive: true
+              config:
+                severity: warn
+
+      - name: preliminary_pin
+        description: Preliminary People-in-Need count. NUMERIC.
+        tests:
+          - dbt_utils.accepted_range:
+              min_value: 0
+              inclusive: true
+              config:
+                severity: error
+
+      - name: final_pin
+        description: Final People-in-Need count. NUMERIC.
+        tests:
+          - dbt_utils.accepted_range:
+              min_value: 0
+              inclusive: true
+              config:
+                severity: error
