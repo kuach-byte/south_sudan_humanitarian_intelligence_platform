@@ -1,0 +1,23 @@
+dataset:
+  id: 001
+  name: jiaf_south_sudan_2026
+  description:  South Sudan Humanitarian Needs 2026 downloaded from HDX
+  owner: HDX
+  priority: 3
+
+source:
+  type: local_file
+  path: data_engineering_layer/data/landing/humanitarian_needs/jiaf_south_sudan_2026.xlsx
+  file_type: excel
+
+loader:
+  class: ExcelLoader
+  chunk_size: 5000
+  infer_schema: true
+  load_mode: replace 
+
+target:
+  database: humanitarian_db
+  schema: raw_data
+  table: jiaf_south_sudan_2026
+ 

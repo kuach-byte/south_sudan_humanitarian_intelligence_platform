@@ -1,0 +1,22 @@
+dataset:
+  id: 016
+  name: admin_3
+  description: South Sudan payams data downloaded from HDX
+  owner: HDX
+  priority: 3
+
+source:
+  type: local_file
+  path: data_engineering_layer/data/landing/gis/admin_3.geojson
+  file_type: geojson
+
+loader:
+  class: GeoJSONLoader
+  chunk_size: 5000
+  infer_schema: true
+
+target:
+  database: humanitarian_db
+  schema: gis
+  table: payam_boundary
+  load_mode: replace  

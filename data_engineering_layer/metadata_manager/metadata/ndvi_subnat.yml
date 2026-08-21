@@ -1,0 +1,25 @@
+# metadata/jiaf_south_sudan_2026.yml
+
+dataset:
+  id: 010
+  name: ndvi_subnat
+  description: South Sudan NDVI data downloaded from HDX
+  owner: HDX
+  priority: 2
+
+source:
+  type: local_file
+  path: data_engineering_layer/data/landing/climate/ndvi_subnat.csv
+  file_type: csv
+
+loader:
+  class: CSVLoader
+  chunk_size: 5000
+  infer_schema: true
+  load_mode: replace 
+  
+target:
+  database: humanitarian_db
+  schema: raw_data
+  table: ndvi_subnat
+ 

@@ -1,0 +1,24 @@
+dataset:
+  id: 002
+  name: ssd_2024_population_estimates
+  description:  South Sudan Population Estimates 2024 downloaded from HDX
+  owner: HDX
+  priority: 2
+
+source:
+  type: local_file
+  path: data_engineering_layer/data/landing/population/ssd_2024_population_estimates_data.xlsx
+  file_type: excel
+
+
+loader:
+  class: ExcelLoader
+  chunk_size: 5000
+  infer_schema: true
+  load_mode: replace 
+  
+target:
+  database: humanitarian_db
+  schema: raw_data
+  table: population_estimates_2024
+ 

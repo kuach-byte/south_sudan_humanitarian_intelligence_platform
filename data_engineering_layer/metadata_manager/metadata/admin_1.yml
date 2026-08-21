@@ -1,0 +1,22 @@
+dataset:
+  id: 014
+  name: admin_1
+  description: South Sudan states data downloaded from HDX
+  owner: HDX
+  priority: 3
+
+source:
+  type: local_file
+  path: data_engineering_layer/data/landing/gis/admin_1.geojson
+  file_type: geojson
+
+loader:
+  class: GeoJSONLoader
+  chunk_size: 5000
+  infer_schema: true
+
+target:
+  database: humanitarian_db
+  schema: gis
+  table: state_boundary
+  load_mode: replace  

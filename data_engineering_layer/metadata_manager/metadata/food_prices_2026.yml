@@ -1,0 +1,24 @@
+dataset:
+  id: 006
+  name: food_prices_2026
+  description: South Sudan food prices downloaded from HDX provided by WFP
+  owner: WFP
+  priority: 2
+
+source:
+  type: local_file
+  path: data_engineering_layer/data/landing/food/food_prices_2026.csv
+  file_type: csv
+
+
+loader:
+  class: CSVLoader
+  chunk_size: 5000
+  infer_schema: true
+  load_mode: replace
+
+target:
+  database: humanitarian_db
+  schema: raw_data
+  table: food_prices_2026
+  

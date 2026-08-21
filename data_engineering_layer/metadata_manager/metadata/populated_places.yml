@@ -1,0 +1,23 @@
+dataset:
+  id: 012
+  name: populated_places
+  description: South Sudan populated places data downloaded from HDX
+  owner: HDX
+  priority: 2
+
+source:
+  type: local_file
+  path: data_engineering_layer/data/landing/infrastructure/populated_places.gpkg
+  file_type: geopackage
+
+loader:
+  class: GeoPackageLoader
+  chunk_size: 5000
+  infer_schema: true
+  load_mode: replace
+   
+target:
+  database: humanitarian_db
+  schema: raw_data
+  table: populated_places
+ 

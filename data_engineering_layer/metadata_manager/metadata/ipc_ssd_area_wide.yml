@@ -1,0 +1,24 @@
+dataset:
+  id: 005
+  name: ipc_ssd_2026
+  description:  South Sudan IPC Area Wide data 2026 downloaded from HDX
+  owner: HDX
+  priority: 2
+
+source:
+  type: local_file
+  path: data_engineering_layer/data/landing/food/ipc_ssd_2026.csv
+  file_type: csv
+
+
+loader:
+  class: CSVLoader
+  chunk_size: 5000
+  infer_schema: true
+  load_mode: replace
+
+target:
+  database: humanitarian_db
+  schema: raw_data
+  table: ipc_ssd_2026
+  
