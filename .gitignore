@@ -14,7 +14,7 @@ logs/
 data/
 
 requirements.txt
-
+dagster-smoke_test.py
 # OS files
 .DS_Store
 Thumbs.db
@@ -23,3 +23,11 @@ Thumbs.db
 *.csv
 *.parquet
 *.db
+
+.tmp_dagster_home_4ojtbi8m/
+.tmp_dagster_home_b6183537/
+.tmp_dagster_home_o9t5ixum/
+.tmp_dagster_home_uxziz5f1/
+.tmp_dagster_home_wdzmtvmc/
+.vscode/
+.pytest_cache/

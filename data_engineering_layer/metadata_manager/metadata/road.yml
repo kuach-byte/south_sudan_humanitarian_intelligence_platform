@@ -15,7 +15,7 @@ loader:
   class: GeoPackageLoader
   chunk_size: 5000
   infer_schema: true
-  load_mode: replace 
+  load_mode: replace  
   
 target:
   database: humanitarian_db

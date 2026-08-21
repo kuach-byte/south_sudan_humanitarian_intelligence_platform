@@ -1,13 +1,13 @@
 dataset:
   id: 011
-  name: affected_displaced_floods_2026
+  name: affected_and_displaced_by_floods_2026
   description: South Sudan affected and displaced by floods data downloaded from HDX
   owner: HDX
   priority: 2
 
 source:
   type: local_file
-  path: data_engineering_layer/data/landing/climate/affected_displaced_floods_2026.xlsx
+  path: data_engineering_layer/data/landing/climate/affected_and_displaced_by_floods.xlsx
   file_type: excel
 
 loader:

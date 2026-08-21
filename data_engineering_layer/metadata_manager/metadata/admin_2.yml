@@ -1,13 +1,13 @@
 dataset:
   id: 015
-  name: admin_2
+  name: ssd_admin2
   description: South Sudan counties data downloaded from HDX
   owner: HDX
   priority: 3
 
 source:
   type: local_file
-  path: data_engineering_layer/data/landing/gis/admin_2.geojson
+  path: data_engineering_layer/data/landing/gis/ssd_admin2.geojson
   file_type: geojson
 
 loader:

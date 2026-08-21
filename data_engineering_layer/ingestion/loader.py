@@ -24,6 +24,7 @@ GeoPackageLoader) without touching the other two.
 
 from __future__ import annotations
 
+import logging
 import os
 from dataclasses import dataclass
 from typing import Optional
@@ -123,6 +124,32 @@ def _get_connection_params() -> dict:
 # Shared PostgreSQL implementation
 # --------------------------------------------------------------------------
 
+logger = logging.getLogger(__name__)
+
+
+def _escape_percent(composed_sql_fragment: str) -> str:
+    """
+    Double any literal '%' in an already-composed SQL fragment.
+
+    `psycopg2.extras.execute_values` takes a plain string and re-parses it
+    looking for a bare '%s' placeholder to expand into the batched VALUES
+    list. If a fragment built with `sql.Composed.as_string()` (as our
+    INSERT statements are, so identifiers can be safely quoted) contains a
+    literal '%' — e.g. from a source column named "Population %" or
+    "% Change" — that re-parse misreads it as the start of a Python-style
+    format directive and raises `ValueError: unsupported format
+    character`. Doubling '%' to '%%' here (standard %-escaping) makes it
+    survive that re-parse as a literal percent sign again.
+
+    IMPORTANT: call this only on the identifier/prefix portion of a
+    statement, never on the final string that still needs its own intact
+    `%s` placeholder — escaping that too would corrupt it into `%%s` and
+    break execute_values entirely. Build the prefix, escape it, then
+    append " VALUES %s" (or the row `template`) afterward.
+    """
+    return composed_sql_fragment.replace("%", "%%")
+
+
 # Maps pandas dtype kind -> PostgreSQL column type. Deliberately small and
 # conservative; anything not recognized falls back to TEXT.
 _DTYPE_TO_PG = {
@@ -198,11 +225,17 @@ class _BasePostgreSQLLoader:
                     )
 
                     if load_mode == "replace":
-                        self._drop_table(cur, schema, table)
-                        self._create_table(cur, schema, table, working_df)
+                        self._replace_load(cur, schema, table, working_df)
                     else:  # append
                         if not self._table_exists(cur, schema, table):
                             self._create_table(cur, schema, table, working_df)
+
+                    # Handles the case where a pre-existing table (replace
+                    # via TRUNCATE, or append onto an existing table) is
+                    # missing a column the source now has — see
+                    # _reconcile_columns()'s docstring. A no-op on a table
+                    # that was just freshly created above.
+                    self._reconcile_columns(cur, schema, table, working_df)
 
                     rows_loaded = self._insert_rows(cur, schema, table, working_df, chunk_size)
         except LoadError:
@@ -255,6 +288,94 @@ class _BasePostgreSQLLoader:
             )
         )
 
+    @staticmethod
+    def _truncate_table(cur, schema: str, table: str) -> None:
+        """
+        Empty an existing table without dropping it.
+
+        Preferred over DROP+CREATE for `load_mode="replace"`: dropping the
+        table breaks any downstream view (e.g. a dbt staging view) that
+        depends on it, forcing a DROP ... CASCADE that silently destroys
+        those objects on every load. TRUNCATE clears all rows in place and
+        leaves the table's identity — and anything built on top of it —
+        intact.
+        """
+        cur.execute(
+            sql.SQL("TRUNCATE TABLE {}.{}").format(
+                sql.Identifier(schema), sql.Identifier(table)
+            )
+        )
+
+    def _replace_load(self, cur, schema: str, table: str, df: pd.DataFrame) -> None:
+        """
+        Prepare a table for a `load_mode="replace"` load.
+
+        If the table already exists, TRUNCATE it in place so dependent
+        views survive. If it doesn't exist yet, create it fresh.
+
+        Note: TRUNCATE assumes the incoming DataFrame's columns match the
+        existing table's columns. If the source schema drifts (columns
+        added/removed/renamed), the subsequent insert will fail loudly on
+        a column mismatch rather than silently loading partial data —
+        surfacing schema evolution issues instead of masking them.
+        """
+        if self._table_exists(cur, schema, table):
+            self._truncate_table(cur, schema, table)
+        else:
+            self._create_table(cur, schema, table, df)
+
+
+    @staticmethod
+    def _get_existing_columns(cur, schema: str, table: str) -> set:
+        """Return the set of column names currently on schema.table."""
+        cur.execute(
+            """
+            SELECT column_name FROM information_schema.columns
+            WHERE table_schema = %s AND table_name = %s
+            """,
+            (schema, table),
+        )
+        return {row[0] for row in cur.fetchall()}
+
+    def _reconcile_columns(self, cur, schema: str, table: str, df: pd.DataFrame) -> None:
+        """
+        Add any DataFrame columns missing from an existing table.
+
+        This only covers the additive case (a new column appeared in the
+        source). It deliberately does NOT drop columns that exist in the
+        table but not in `df`, and does NOT attempt to detect a renamed
+        or retyped column — those are ambiguous from column names alone
+        and are left to fail loudly at insert time (or to a future,
+        more deliberate schema-migration step) rather than being guessed
+        at silently here.
+
+        Only relevant when the table already existed before this load
+        (a `load_mode="replace"` TRUNCATE, or an `load_mode="append"`
+        onto a pre-existing table) — a freshly created table already
+        matches `df` by construction.
+        """
+        existing = self._get_existing_columns(cur, schema, table)
+        missing = [col for col in df.columns if col not in existing]
+
+        if not missing:
+            return
+
+        logger.warning(
+            "Table '%s.%s' is missing column(s) present in the source: %s. "
+            "Adding them as nullable columns.",
+            schema, table, missing,
+        )
+
+        for col in missing:
+            cur.execute(
+                sql.SQL("ALTER TABLE {}.{} ADD COLUMN {} {}").format(
+                    sql.Identifier(schema),
+                    sql.Identifier(table),
+                    sql.Identifier(col),
+                    sql.SQL(self._pg_type_for(df[col])),
+                )
+            )
+
     def _create_table(self, cur, schema: str, table: str, df: pd.DataFrame) -> None:
         columns_sql = sql.SQL(", ").join(
             sql.SQL("{} {}").format(sql.Identifier(col), sql.SQL(self._pg_type_for(df[col])))
@@ -273,15 +394,21 @@ class _BasePostgreSQLLoader:
     @staticmethod
     def _insert_rows(cur, schema: str, table: str, df: pd.DataFrame, chunk_size: int) -> int:
         columns_sql = sql.SQL(", ").join(sql.Identifier(c) for c in df.columns)
-        insert_stmt = sql.SQL("INSERT INTO {}.{} ({}) VALUES %s").format(
+        insert_prefix = sql.SQL("INSERT INTO {}.{} ({})").format(
             sql.Identifier(schema), sql.Identifier(table), columns_sql
         )
+        # Escape any literal '%' baked into quoted column identifiers
+        # (e.g. a column named "Population %") before appending the
+        # VALUES %s placeholder execute_values needs intact to inject
+        # the batched rows. See _escape_percent()'s docstring.
+        insert_stmt = _escape_percent(insert_prefix.as_string(cur)) + " VALUES %s"
+
         # object dtype columns may hold NaN; psycopg2 needs None for NULL.
         records = [
             tuple(None if pd.isna(v) else v for v in row)
             for row in df.itertuples(index=False, name=None)
         ]
-        execute_values(cur, insert_stmt.as_string(cur), records, page_size=chunk_size)
+        execute_values(cur, insert_stmt, records, page_size=chunk_size)
         return len(records)
 
     # -- geometry handling (isolated from the generic path) -----------------
@@ -401,10 +528,7 @@ class GeoPackageLoader(_BasePostgreSQLLoader):
                         ).format(sql.Identifier(schema))
                     )
 
-                    if load_mode == "replace":
-                        self._drop_table(cur, schema, table)
-
-                    elif load_mode != "append":
+                    if load_mode not in self.LOAD_MODES:
                         raise UnsupportedLoadModeError(
                             f"Unsupported load_mode '{load_mode}'. "
                             f"Supported: {sorted(self.LOAD_MODES)}",
@@ -412,9 +536,16 @@ class GeoPackageLoader(_BasePostgreSQLLoader):
                             table,
                         )
 
-                    if load_mode == "replace" or not self._table_exists(
-                        cur, schema, table
-                    ):
+                    table_exists = self._table_exists(cur, schema, table)
+
+                    if load_mode == "replace" and table_exists:
+                        # TRUNCATE in place rather than DROP+CREATE, so any
+                        # downstream view (e.g. a dbt staging view) built on
+                        # this spatial table survives the reload. See
+                        # _replace_load()'s docstring on _BasePostgreSQLLoader
+                        # for the same rationale on the non-spatial path.
+                        self._truncate_table(cur, schema, table)
+                    elif not table_exists:
                         self._create_spatial_table(
                             cur=cur,
                             schema=schema,
@@ -511,11 +642,9 @@ class GeoPackageLoader(_BasePostgreSQLLoader):
         """
         Determine the PostGIS geometry type from the GeoDataFrame.
 
-        Examples:
-            Point
-            LineString
-            Polygon
-            MultiPolygon
+        If all geometries share the same type, preserve that specific type.
+        If multiple geometry types are present, use the generic PostGIS
+        Geometry type so the raw ingestion layer can preserve the source data.
         """
 
         geometry_types = gdf.geometry.geom_type.dropna().unique()
@@ -523,13 +652,10 @@ class GeoPackageLoader(_BasePostgreSQLLoader):
         if len(geometry_types) == 0:
             raise LoadError("GeoDataFrame contains no valid geometries")
 
-        if len(geometry_types) > 1:
-            raise LoadError(
-                "GeoDataFrame contains multiple geometry types: "
-                f"{list(geometry_types)}"
-            )
+        if len(geometry_types) == 1:
+            return geometry_types[0]
 
-        return geometry_types[0]
+        return "Geometry"
 
     @staticmethod
     def _insert_spatial_rows(
@@ -568,13 +694,17 @@ class GeoPackageLoader(_BasePostgreSQLLoader):
             sql.SQL(", ").join(value_placeholders)
         )
 
-        insert_stmt = sql.SQL(
-            "INSERT INTO {}.{} ({}) VALUES %s"
+        insert_prefix = sql.SQL(
+            "INSERT INTO {}.{} ({})"
         ).format(
             sql.Identifier(schema),
             sql.Identifier(table),
             columns_sql,
         )
+        # Escape any literal '%' baked into quoted column identifiers
+        # before appending the VALUES %s placeholder execute_values needs
+        # intact. See _escape_percent()'s docstring.
+        insert_stmt = _escape_percent(insert_prefix.as_string(cur)) + " VALUES %s"
 
         records = []
         srid = gdf.crs.to_epsg()
@@ -593,7 +723,7 @@ class GeoPackageLoader(_BasePostgreSQLLoader):
 
         execute_values(
             cur,
-            insert_stmt.as_string(cur),
+            insert_stmt,
             records,
             template=row_template.as_string(cur),
             page_size=chunk_size,

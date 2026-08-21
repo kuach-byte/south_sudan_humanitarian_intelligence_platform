@@ -1,13 +1,13 @@
 dataset:
   id: 014
-  name: admin_1
+  name: ssd_admin1
   description: South Sudan states data downloaded from HDX
   owner: HDX
   priority: 3
 
 source:
   type: local_file
-  path: data_engineering_layer/data/landing/gis/admin_1.geojson
+  path: data_engineering_layer/data/landing/gis/ssd_admin1.geojson
   file_type: geojson
 
 loader:

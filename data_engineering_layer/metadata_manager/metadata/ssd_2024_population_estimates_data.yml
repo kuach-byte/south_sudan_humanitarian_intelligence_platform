@@ -10,7 +10,7 @@ source:
   path: data_engineering_layer/data/landing/population/ssd_2024_population_estimates_data.xlsx
   file_type: excel
 
-
+ 
 loader:
   class: ExcelLoader
   chunk_size: 5000

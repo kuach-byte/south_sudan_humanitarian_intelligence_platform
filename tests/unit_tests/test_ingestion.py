@@ -220,12 +220,12 @@ def test_geojson_extraction_preserves_geometry_and_crs(tmp_path):
     assert len(result) == 2
 
 
-def test_geojson_loader_uses_postgis_insert_path(monkeypatch):
-    """Test B: GeoJSONLoader.load() drives the same spatial (PostGIS)
-    write path as GeoPackageLoader -- geometry is handed to the spatial
-    insert routine untouched (never cast to str/WKT for the load), and
-    the configured schema/table/chunk_size are respected. Database
-    interaction is mocked; no real PostgreSQL is used.
+def test_geojson_loader_creates_table_when_absent(monkeypatch):
+    """Test B1: with no existing table, replace mode creates the spatial
+    table fresh and drives the same PostGIS insert path as GeoPackageLoader
+    -- geometry is handed to the spatial insert routine untouched (never
+    cast to str/WKT), and the configured schema/table/chunk_size are
+    respected. Database interaction is mocked; no real PostgreSQL is used.
     """
     gpd = pytest.importorskip("geopandas")
     from shapely.geometry import Point
@@ -241,11 +241,16 @@ def test_geojson_loader_uses_postgis_insert_path(monkeypatch):
     fake_conn = MagicMock(name="fake_pg_connection")
     monkeypatch.setattr(ld.psycopg2, "connect", MagicMock(return_value=fake_conn))
 
+    # No table exists yet -> replace mode must create it.
+    monkeypatch.setattr(ld.GeoJSONLoader, "_table_exists", MagicMock(return_value=False))
+
     create_spatial_table_mock = MagicMock(name="_create_spatial_table")
+    truncate_table_mock = MagicMock(name="_truncate_table")
     insert_spatial_rows_mock = MagicMock(name="_insert_spatial_rows", return_value=len(gdf))
     create_spatial_index_mock = MagicMock(name="_create_spatial_index")
 
     monkeypatch.setattr(ld.GeoJSONLoader, "_create_spatial_table", create_spatial_table_mock)
+    monkeypatch.setattr(ld.GeoJSONLoader, "_truncate_table", truncate_table_mock)
     monkeypatch.setattr(ld.GeoJSONLoader, "_insert_spatial_rows", insert_spatial_rows_mock)
     monkeypatch.setattr(ld.GeoJSONLoader, "_create_spatial_index", create_spatial_index_mock)
 
@@ -261,11 +266,67 @@ def test_geojson_loader_uses_postgis_insert_path(monkeypatch):
     assert result.rows_loaded == len(gdf)
 
     create_spatial_table_mock.assert_called_once()
+    truncate_table_mock.assert_not_called()
     insert_spatial_rows_mock.assert_called_once()
     create_spatial_index_mock.assert_called_once()
 
     # geometry passed through to the spatial insert routine must still be
     # real shapely geometry objects, not strings/WKT.
+    inserted_gdf = insert_spatial_rows_mock.call_args.kwargs.get("gdf")
+    assert inserted_gdf is not None
+    assert list(inserted_gdf.geometry) == original_geometry
+    assert not any(isinstance(g, str) for g in inserted_gdf.geometry)
+
+
+def test_geojson_loader_truncates_when_table_exists(monkeypatch):
+    """Test B2: with an existing table, replace mode TRUNCATEs in place
+    instead of dropping and recreating -- this is what keeps a downstream
+    dbt view built on this table alive across reloads. _create_spatial_table
+    must NOT be called in this branch.
+    """
+    gpd = pytest.importorskip("geopandas")
+    from shapely.geometry import Point
+
+    from data_engineering_layer.ingestion import loader as ld
+
+    gdf = gpd.GeoDataFrame(
+        {"name": ["a", "b"], "geometry": [Point(0.0, 0.0), Point(1.0, 1.0)]},
+        crs="EPSG:4326",
+    )
+    original_geometry = list(gdf.geometry)
+
+    fake_conn = MagicMock(name="fake_pg_connection")
+    monkeypatch.setattr(ld.psycopg2, "connect", MagicMock(return_value=fake_conn))
+
+    # Table already exists -> replace mode must truncate, not recreate.
+    monkeypatch.setattr(ld.GeoJSONLoader, "_table_exists", MagicMock(return_value=True))
+
+    create_spatial_table_mock = MagicMock(name="_create_spatial_table")
+    truncate_table_mock = MagicMock(name="_truncate_table")
+    insert_spatial_rows_mock = MagicMock(name="_insert_spatial_rows", return_value=len(gdf))
+    create_spatial_index_mock = MagicMock(name="_create_spatial_index")
+
+    monkeypatch.setattr(ld.GeoJSONLoader, "_create_spatial_table", create_spatial_table_mock)
+    monkeypatch.setattr(ld.GeoJSONLoader, "_truncate_table", truncate_table_mock)
+    monkeypatch.setattr(ld.GeoJSONLoader, "_insert_spatial_rows", insert_spatial_rows_mock)
+    monkeypatch.setattr(ld.GeoJSONLoader, "_create_spatial_index", create_spatial_index_mock)
+
+    loader = ld.GeoJSONLoader(connection_params={"host": "test", "port": 5432, "dbname": "test_db", "user": "test_user", "password": "test_pass"})
+    result = loader.load(
+        gdf, schema="raw_data", table="admin1_boundary", load_mode="replace", chunk_size=250
+    )
+
+    assert isinstance(result, ld.LoadResult)
+    assert result.schema == "raw_data"
+    assert result.table == "admin1_boundary"
+    assert result.load_mode == "replace"
+    assert result.rows_loaded == len(gdf)
+
+    truncate_table_mock.assert_called_once()
+    create_spatial_table_mock.assert_not_called()
+    insert_spatial_rows_mock.assert_called_once()
+    create_spatial_index_mock.assert_called_once()
+
     inserted_gdf = insert_spatial_rows_mock.call_args.kwargs.get("gdf")
     assert inserted_gdf is not None
     assert list(inserted_gdf.geometry) == original_geometry

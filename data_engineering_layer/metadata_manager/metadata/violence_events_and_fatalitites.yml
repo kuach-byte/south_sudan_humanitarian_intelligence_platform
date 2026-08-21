@@ -7,7 +7,7 @@ dataset:
 
 source:
   type: local_file
-  path: data_engineering_layer/data/landing/conflict/violence_events_and_fatalities_2026.xlsx
+  path: data_engineering_layer/data/landing/conflict/violence_events_and_fatalities.xlsx
   file_type: Excel
   
 loader:
