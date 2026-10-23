@@ -1,46 +1,20 @@
-
--- ============================================================
--- 1. SCHEMA
--- ============================================================
-
 CREATE SCHEMA IF NOT EXISTS data_profiling;
 
-
--- ============================================================
--- 2. PROFILING RUNS
--- One run can profile a single dataset or analyze a
--- relationship between multiple datasets.
--- ============================================================
-
+--   PROFILING RUNS
 CREATE TABLE IF NOT EXISTS data_profiling.profile_run (
     run_id              BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
     dataset_id          BIGINT
         REFERENCES metadata_manager.dataset(id),
-    run_scope           TEXT NOT NULL DEFAULT 'single_dataset'
-        CHECK (run_scope IN ('single_dataset', 'cross_dataset')),
     started_at          TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     completed_at        TIMESTAMPTZ,
     status              TEXT NOT NULL DEFAULT 'running'
         CHECK (status IN ('running', 'completed', 'failed')),
-    profiler_version    TEXT,
     row_count           BIGINT CHECK (row_count >= 0),
     error_message       TEXT,
-    parameters          JSONB NOT NULL DEFAULT '{}'::jsonb,
-
-    CHECK (
-        (run_scope = 'single_dataset' AND dataset_id IS NOT NULL)
-        OR
-        (run_scope = 'cross_dataset' AND dataset_id IS NULL)
-    ),
     CHECK (completed_at IS NULL OR completed_at >= started_at)
 );
 
-
--- ============================================================
--- 3. COLUMN PROFILES
--- One record per column per profiling run.
--- ============================================================
-
+-- COLUMN PROFILES
 CREATE TABLE IF NOT EXISTS data_profiling.column_profile (
     column_profile_id   BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
     run_id              BIGINT NOT NULL
@@ -48,7 +22,6 @@ CREATE TABLE IF NOT EXISTS data_profiling.column_profile (
         ON DELETE CASCADE,
 
     column_name         TEXT NOT NULL,
-    ordinal_position    INTEGER,
     source_data_type    TEXT,
     inferred_type       TEXT,
 
@@ -64,6 +37,10 @@ CREATE TABLE IF NOT EXISTS data_profiling.column_profile (
     UNIQUE (run_id, column_name),
     UNIQUE (run_id, column_profile_id),
 
+    empty_string_pct        DOUBLE PRECISION,
+    whitespace_only_count   BIGINT,
+    whitespace_only_pct     DOUBLE PRECISION,
+
     CHECK (total_count >= 0),
     CHECK (non_null_count >= 0),
     CHECK (null_count >= 0),
@@ -75,15 +52,14 @@ CREATE TABLE IF NOT EXISTS data_profiling.column_profile (
     CHECK (null_count <= total_count),
     CHECK (empty_string_count <= non_null_count),
     CHECK (distinct_count IS NULL OR distinct_count <= non_null_count),
+    CHECK (empty_string_pct IS NULL OR empty_string_pct BETWEEN 0 AND 100),
+    CHECK (whitespace_only_count IS NULL OR whitespace_only_count >= 0),
+    CHECK (whitespace_only_pct IS NULL OR whitespace_only_pct BETWEEN 0 AND 100),
+    CHECK (whitespace_only_count IS NULL OR whitespace_only_count <= non_null_count),
     CHECK (sentinel_count IS NULL OR sentinel_count <= non_null_count)
 );
 
-
--- ============================================================
--- 4. COLUMN METRICS
--- Flexible storage for statistical and quality metrics.
--- ============================================================
-
+-- COLUMN METRICS
 CREATE TABLE IF NOT EXISTS data_profiling.column_metric (
     metric_id           BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
     run_id              BIGINT NOT NULL,
@@ -103,7 +79,7 @@ CREATE TABLE IF NOT EXISTS data_profiling.column_metric (
         ON DELETE CASCADE,
 
     CHECK (
-        num_nonnull_values(
+        num_nonnulls(
             metric_value_numeric,
             metric_value_text,
             metric_value_json
@@ -111,12 +87,7 @@ CREATE TABLE IF NOT EXISTS data_profiling.column_metric (
     )
 );
 
-
--- ============================================================
--- 5. COLUMN DISTRIBUTIONS
--- Supports categorical frequencies and numeric bins.
--- ============================================================
-
+-- COLUMN DISTRIBUTIONS
 CREATE TABLE IF NOT EXISTS data_profiling.column_distribution (
     distribution_id    BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
     run_id              BIGINT NOT NULL,
@@ -142,11 +113,7 @@ CREATE TABLE IF NOT EXISTS data_profiling.column_distribution (
 );
 
 
--- ============================================================
--- 6. COLUMN CORRELATIONS
--- One row per pair of columns and correlation method.
--- ============================================================
-
+-- COLUMN CORRELATIONS
 CREATE TABLE IF NOT EXISTS data_profiling.column_correlation (
     correlation_id      BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
     run_id              BIGINT NOT NULL,
@@ -178,11 +145,7 @@ CREATE TABLE IF NOT EXISTS data_profiling.column_correlation (
     UNIQUE (run_id, column_a_id, column_b_id, method)
 );
 
-
--- ============================================================
--- 7. SPATIAL PROFILES
--- One record per spatial column per profiling run.
--- ============================================================
+-- SPATIAL PROFILES
 
 CREATE TABLE IF NOT EXISTS data_profiling.spatial_profile (
     spatial_profile_id      BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
@@ -218,7 +181,7 @@ CREATE TABLE IF NOT EXISTS data_profiling.spatial_profile (
         REFERENCES data_profiling.column_profile
             (run_id, column_profile_id)
         ON DELETE CASCADE,
-
+ 
     UNIQUE (run_id, column_profile_id),
 
     CHECK (
@@ -236,70 +199,7 @@ CREATE TABLE IF NOT EXISTS data_profiling.spatial_profile (
     )
 );
 
-
--- ============================================================
--- 8. CROSS-DATASET SPATIAL RELATIONSHIPS
--- Stores summaries of spatial operations between two datasets.
--- ============================================================
-
-CREATE TABLE IF NOT EXISTS data_profiling.spatial_relationship (
-    relationship_id       BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-
-    analysis_run_id       BIGINT NOT NULL
-        REFERENCES data_profiling.profile_run(run_id)
-        ON DELETE CASCADE,
-
-    left_dataset_id       BIGINT NOT NULL
-        REFERENCES metadata_manager.dataset(id),
-    right_dataset_id      BIGINT NOT NULL
-        REFERENCES metadata_manager.dataset(id),
-
-    left_source_schema    TEXT NOT NULL,
-    left_source_table     TEXT NOT NULL,
-    left_geometry_column  TEXT NOT NULL,
-
-    right_source_schema   TEXT NOT NULL,
-    right_source_table    TEXT NOT NULL,
-    right_geometry_column TEXT NOT NULL,
-
-    relationship_type     TEXT NOT NULL,
-    spatial_predicate     TEXT,
-    analysis_crs_srid     INTEGER,
-
-    left_feature_count    BIGINT,
-    right_feature_count   BIGINT,
-    matching_pair_count  BIGINT,
-    unmatched_left_count BIGINT,
-    unmatched_right_count BIGINT,
-
-    overlap_area          DOUBLE PRECISION,
-    overlap_area_unit     TEXT,
-    distance_value        DOUBLE PRECISION,
-    distance_unit         TEXT,
-
-    parameters            JSONB NOT NULL DEFAULT '{}'::jsonb,
-    result_summary        JSONB NOT NULL DEFAULT '{}'::jsonb,
-    created_at            TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-
-    CHECK (left_dataset_id <> right_dataset_id
-        OR left_source_schema <> right_source_schema
-        OR left_source_table <> right_source_table
-        OR left_geometry_column <> right_geometry_column),
-
-    CHECK (left_feature_count IS NULL OR left_feature_count >= 0),
-    CHECK (right_feature_count IS NULL OR right_feature_count >= 0),
-    CHECK (matching_pair_count IS NULL OR matching_pair_count >= 0),
-    CHECK (unmatched_left_count IS NULL OR unmatched_left_count >= 0),
-    CHECK (unmatched_right_count IS NULL OR unmatched_right_count >= 0),
-    CHECK (overlap_area IS NULL OR overlap_area >= 0),
-    CHECK (distance_value IS NULL OR distance_value >= 0)
-);
-
-
--- ============================================================
--- 9. DATA QUALITY ISSUES
--- Summary findings, not copies of source records.
--- ============================================================
+--DATA QUALITY ISSUES
 
 CREATE TABLE IF NOT EXISTS data_profiling.profile_issue (
     issue_id             BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
@@ -327,10 +227,6 @@ CREATE TABLE IF NOT EXISTS data_profiling.profile_issue (
 );
 
 
--- ============================================================
--- 10. INDEXES
--- ============================================================
-
 CREATE INDEX IF NOT EXISTS idx_profile_run_dataset
     ON data_profiling.profile_run (dataset_id, started_at DESC);
 
@@ -349,12 +245,15 @@ CREATE INDEX IF NOT EXISTS idx_correlation_run
 CREATE INDEX IF NOT EXISTS idx_spatial_profile_run
     ON data_profiling.spatial_profile (run_id);
 
-CREATE INDEX IF NOT EXISTS idx_spatial_relationship_datasets
-    ON data_profiling.spatial_relationship
-        (left_dataset_id, right_dataset_id, relationship_type);
-
-CREATE INDEX IF NOT EXISTS idx_spatial_relationship_run
-    ON data_profiling.spatial_relationship (analysis_run_id);
-
 CREATE INDEX IF NOT EXISTS idx_profile_issue_run_status
     ON data_profiling.profile_issue (run_id, status, severity);
+CREATE INDEX IF NOT EXISTS idx_column_metric_profile_fk
+    ON data_profiling.column_metric (run_id, column_profile_id);
+
+CREATE INDEX IF NOT EXISTS idx_column_correlation_a_fk
+    ON data_profiling.column_correlation (run_id, column_a_id);
+CREATE INDEX IF NOT EXISTS idx_column_correlation_b_fk
+    ON data_profiling.column_correlation (run_id, column_b_id);
+
+CREATE INDEX IF NOT EXISTS idx_profile_issue_profile_fk
+    ON data_profiling.profile_issue (run_id, column_profile_id);
