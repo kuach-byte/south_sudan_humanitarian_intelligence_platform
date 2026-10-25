@@ -14,3 +14,7 @@ def metadata_registration(prevalidation: list[dict]) -> None:
 @asset(deps=[metadata_registration])
 def loading(prevalidation: list[dict]) -> None:
     PipelineRunner().run_loading(prevalidation)
+
+@asset(deps=[loading])
+def data_profiling() -> dict:
+    return PipelineRunner().run_data_profiling()

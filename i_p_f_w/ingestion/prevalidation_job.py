@@ -149,33 +149,13 @@ class Prevalidationjob:
             shutil.move(str(f), str(dest_dir / f.name))
 
 
-    def _existing_ids(self):
-        ids = {}
-
-        for f in self.metadata_dir.glob("*.yml"):
-            meta = yaml.safe_load(f.read_text())
-
-            source_path = meta["source"]["path"]
-            dataset_id = int(meta["dataset"]["id"])
-
-            ids[source_path] = dataset_id
-
-        return ids
 
     def metadata_exists(self, path):
         return (self.metadata_dir / f"{path.stem}.yml").exists()
 
-
-    @staticmethod
-    def _assign_id(source_path, ids):
-        if source_path not in ids:
-            ids[source_path] = max(ids.values(), default=0) + 1
-        return ids[source_path]
-
-    def build_metadata(self, path, dataset_id):
+    def build_metadata(self, path):
         return {
             "dataset": {
-                "id": dataset_id, 
                 "name": path.stem, 
                 "registered_at": datetime.now(timezone.utc).isoformat(),
             },
@@ -191,19 +171,10 @@ class Prevalidationjob:
             },
         }
 
-    def write_metadata(self, path, metadata):
-        self.metadata_dir.mkdir(parents=True, exist_ok=True)
-        out = self.metadata_dir / f"{path.stem}.yml"
-        out.write_text(yaml.safe_dump(metadata, sort_keys=False))
-        return out
 
     def run(self):
         job_start = time.perf_counter()
 
-        # -------------------------
-        # Existing metadata timing
-        # -------------------------
-        ids = {} 
 
         # -------------------------
         # Dataset discovery timing
@@ -305,13 +276,9 @@ class Prevalidationjob:
                 result["status"] = "rejected"
 
             else:
-                dataset_id = self._assign_id(rel_path, ids)
-                metadata = self.build_metadata(path, dataset_id)
-
-                result["metadata"] = metadata
+                result["metadata"] = self.build_metadata(path)
                 result["status"] = "valid"
                 result["data"] = data
-
 
             action_time = time.perf_counter() - action_start
 

@@ -4,6 +4,7 @@ from pathlib import Path
 from i_p_f_w.ingestion.loader_job import Loader
 from i_p_f_w.ingestion.prevalidation_job import Prevalidationjob
 from i_p_f_w.metadata_manager.metadata_registry import MetadataRegistry
+from i_p_f_w.data_profiling.data_profiling import run_profiling
 
 log = logging.getLogger(__name__)
 
@@ -57,7 +58,33 @@ class PipelineRunner:
             raise RuntimeError(f"Loading failed for {len(failed)} of {len(valid)} dataset(s): {failed}")
         return len(valid)
 
+    def run_data_profiling(self):
+        log.info("Data profiling started")
+
+        try:
+            summary = run_profiling()
+        except Exception as exc:
+            raise RuntimeError(f"Data profiling failed: {exc}") from exc
+
+        completed = summary["completed"]
+        failed = summary["failed"]
+        missing = summary["missing_tables"]
+
+        log.info("Data profiling completed: %d datasets", len(completed))
+
+        if missing:
+            log.warning("Datasets with missing raw_data tables: %s", missing)
+
+        if failed:
+            raise RuntimeError(
+                f"Data profiling failed for {len(failed)} dataset(s): {failed}"
+            )
+
+        return summary
+
+
     def run(self):
         validation_results = self.run_prevalidation()
         self.run_metadata_registration(validation_results)
-        return self.run_loading(validation_results)
+        self.run_loading(validation_results)
+        return self.run_data_profiling()

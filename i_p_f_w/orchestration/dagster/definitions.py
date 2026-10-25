@@ -1,9 +1,18 @@
+
 from dagster import Definitions
 
 from i_p_f_w.orchestration.dagster.assets import (
-    loading,
-    metadata_registration,
     prevalidation,
+    metadata_registration,
+    loading,
+    data_profiling,
 )
 
-defs = Definitions(assets=[metadata_registration, prevalidation, loading])
+defs = Definitions(
+    assets=[
+        prevalidation,
+        metadata_registration,
+        loading,
+        data_profiling,
+    ]
+)
