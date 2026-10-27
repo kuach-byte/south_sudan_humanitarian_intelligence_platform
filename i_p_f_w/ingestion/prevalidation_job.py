@@ -21,6 +21,24 @@ TARGET_SCHEMA = "raw_data"
 # Missing-value profiling, duplicate rows/features (WKB), statistics and
 # cleaning are deliberately left to dbt staging / downstream DQ.
 
+
+def make_unique_columns(names):
+    """Return (unique_names, renamed). renamed is a list of (old, new) pairs."""
+    used, out, renamed = set(), [], []
+    for i, raw in enumerate(names):
+        name = "" if pd.isna(raw) else str(raw).strip()
+        base = name or f"unnamed_{i + 1}"
+        new, n = base, 1
+        while new in used:
+            n += 1
+            new = f"{base}_{n}"
+        used.add(new)
+        if new != ("" if pd.isna(raw) else str(raw)):
+            renamed.append(("" if pd.isna(raw) else str(raw), new))
+        out.append(new)
+    return out, renamed
+
+
 def validate_general(df):
     errors, warnings = [], []
 
@@ -29,13 +47,19 @@ def validate_general(df):
     if df.shape[0] == 0:
         errors.append("Dataset has no rows")
 
-    # a raw table cannot be created with duplicate column names
+    renamed = df.attrs.get("renamed_columns", [])
+    if renamed:
+        shown = ", ".join(f"{old!r} -> {new!r}" for old, new in renamed[:10])
+        more = f" (+{len(renamed) - 10} more)" if len(renamed) > 10 else ""
+        warnings.append(f"Renamed {len(renamed)} column(s): {shown}{more}")
+
+    # a raw table cannot be created with duplicate column names;
+    # extraction renames them, so this should never fire
     duplicated = df.columns[df.columns.duplicated()].unique().tolist()
     if duplicated:
-        warnings.append(f"Duplicate column names: {duplicated}")
+        errors.append(f"Duplicate column names after renaming: {duplicated}")
 
     return errors, warnings
-
 
 def validate_geospatial(gdf):
     errors = []
@@ -100,6 +124,7 @@ class Prevalidationjob:
 
         if ext in GEOSPATIAL_EXTENSIONS:
             return pyogrio.read_dataframe(path)
+
         if ext == ".csv":
             with open(path, newline="", encoding="utf-8-sig") as f:
                 header = next(csv.reader(f), [])
@@ -107,12 +132,10 @@ class Prevalidationjob:
             if not header:
                 return pd.DataFrame()
 
-            return pd.read_csv(
-                path,
-                header=0,
-                names=header,
-                encoding="utf-8-sig",
-            )
+            names, renamed = make_unique_columns(header)
+            df = pd.read_csv(path, header=0, names=names, encoding="utf-8-sig")
+            df.attrs["renamed_columns"] = renamed
+            return df
 
         if ext in {".xlsx", ".xls"}:
             raw = pd.read_excel(path, header=None)
@@ -120,10 +143,12 @@ class Prevalidationjob:
             if raw.empty:
                 return pd.DataFrame()
 
-            df = raw.iloc[1:]
-            df.columns = raw.iloc[0].tolist()
-
+            names, renamed = make_unique_columns(raw.iloc[0].tolist())
+            df = raw.iloc[1:].copy()
+            df.columns = names
+            df.attrs["renamed_columns"] = renamed
             return df
+
 
         if ext == ".json":
             return pd.read_json(path)
