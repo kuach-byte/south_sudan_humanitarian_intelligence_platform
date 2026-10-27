@@ -2,6 +2,11 @@ from dagster import asset
 from i_p_f_w.orchestration.pipeline_runner.pipeline_runner import PipelineRunner
 
 @asset
+def database_bootstrap() -> None:
+    PipelineRunner().run_database_bootstrap()
+ 
+
+@asset
 def prevalidation() -> list[dict]:
     return PipelineRunner().run_prevalidation()
 

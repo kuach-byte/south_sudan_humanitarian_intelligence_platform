@@ -4,6 +4,7 @@ from pathlib import Path
 from i_p_f_w.ingestion.loader_job import Loader
 from i_p_f_w.ingestion.prevalidation_job import Prevalidationjob
 from i_p_f_w.metadata_manager.metadata_registry import MetadataRegistry
+from i_p_f_w.schemas.database_bootstrap import run_bootstrap
 from i_p_f_w.data_profiling.data_profiling import run_profiling
 
 log = logging.getLogger(__name__)
@@ -13,6 +14,14 @@ class PipelineRunner:
     def __init__(self, project_root=None):
         # <root>/data_engineering_layer/orchestration/dagster/pipeline_runner/pipeline_runner.py
         self.root = Path(project_root or Path(__file__).resolve().parents[3]).resolve()
+
+    def run_database_bootstrap(self):
+        log.info("Database bootstrap started")
+        try:
+            run_bootstrap()
+        except Exception as exc:
+            raise RuntimeError(f"Database bootstrap failed: {exc}") from exc
+        log.info("Database bootstrap completed")
 
     def run_metadata_registration(self, validation_results):
         log.info("Metadata registration started")
@@ -84,6 +93,7 @@ class PipelineRunner:
 
 
     def run(self):
+        self.run_database_bootstrap()
         validation_results = self.run_prevalidation()
         self.run_metadata_registration(validation_results)
         self.run_loading(validation_results)

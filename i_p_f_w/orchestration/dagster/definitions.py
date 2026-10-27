@@ -1,7 +1,7 @@
-
 from dagster import Definitions
 
 from i_p_f_w.orchestration.dagster.assets import (
+    database_bootstrap,
     prevalidation,
     metadata_registration,
     loading,
@@ -10,6 +10,7 @@ from i_p_f_w.orchestration.dagster.assets import (
 
 defs = Definitions(
     assets=[
+        database_bootstrap,
         prevalidation,
         metadata_registration,
         loading,
