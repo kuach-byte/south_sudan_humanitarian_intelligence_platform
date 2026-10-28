@@ -18,9 +18,14 @@ CREATE TABLE IF NOT EXISTS metadata_manager.source (
         REFERENCES metadata_manager.dataset(id)
         ON UPDATE CASCADE
         ON DELETE CASCADE,
+    source      TEXT,
+    source_id   TEXT,
+    contributor TEXT,
     type       TEXT,
     path       TEXT,
-    file_type  TEXT
+    file_type  TEXT,
+    time_period_begin TIMESTAMPTZ,
+    time_period_end TIMESTAMPTZ
 );
 
 -- ------------------------------------------------------------

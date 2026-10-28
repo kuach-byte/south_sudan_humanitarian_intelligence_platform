@@ -12,6 +12,8 @@ from dotenv import load_dotenv
 from pandas.api import types as pdt
 from psycopg2 import sql
 
+from i_p_f_w.metadata_manager.yaml_metadata_parser import sidecars_for
+
 log = logging.getLogger(__name__)
 
 CHUNK_SIZE = 50_000
@@ -145,6 +147,8 @@ class Loader:
                 files = [f for f in source.parent.iterdir() if f.is_file() and f.stem == source.stem]
             else:
                 files = [source]
+            # the metadata YAML follows its data file into achieved/
+            files += [f for f in sidecars_for(source) if f not in files]
             for f in files:
                 shutil.move(str(f), str(dest_dir / f.name))
         except (KeyError, TypeError, ValueError, OSError) as exc:

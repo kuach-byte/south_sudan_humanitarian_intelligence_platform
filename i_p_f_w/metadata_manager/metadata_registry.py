@@ -6,10 +6,15 @@ from pathlib import Path
 import psycopg2
 from dotenv import find_dotenv, load_dotenv
 
+from i_p_f_w.metadata_manager.yaml_metadata_parser import YamlMetadataParser
+
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 log = logging.getLogger("metadata_registry")
 
 SCHEMA = "metadata_manager"  # overrides DB_SCHEMA from .env for this program only
+# metadata_manager.source columns a metadata["source"] dict may set (fixed list, so safe to put in the SQL text)
+SOURCE_COLUMNS = ("source", "source_id", "contributor", "type", "path", "file_type",
+                  "time_period_begin", "time_period_end")
 
 
 class MetadataRegistry:
@@ -36,11 +41,15 @@ class MetadataRegistry:
         return dataset_id
 
     def register_source(self, cur, dataset_id, source):
-        """Replace the dataset's source row with the YAML definition."""
-        cur.execute(f"DELETE FROM {SCHEMA}.source WHERE dataset_id = %s", (dataset_id,))
+        """Upsert the dataset's source row (one per dataset). Only the columns present in `source` are written, so the
+        pipeline's type/path/file_type and the YAML's descriptive fields can be registered separately without erasing each other."""
+        cols = [c for c in SOURCE_COLUMNS if c in source]
+        if not cols:
+            return
         cur.execute(
-            f"INSERT INTO {SCHEMA}.source (dataset_id, type, path, file_type) VALUES (%s, %s, %s, %s)",
-            (dataset_id, source.get("type"), source.get("path"), source.get("file_type")),
+            f"INSERT INTO {SCHEMA}.source (dataset_id, {', '.join(cols)}) VALUES (%s, {', '.join(['%s'] * len(cols))}) "
+            f"ON CONFLICT (dataset_id) DO UPDATE SET {', '.join(f'{c} = EXCLUDED.{c}' for c in cols)}",
+            (dataset_id, *[source[c] for c in cols]),
         )
         log.info("Source registered for dataset_id=%s", dataset_id)
 
@@ -82,5 +91,16 @@ class MetadataRegistry:
             return 1
         log.info("Metadata registration completed successfully (%d dataset(s))", len(metadata))
         return 0
+
+    def register_from_yaml(self, project_root=None, parser=None):
+        """Register every dataset that has a valid metadata YAML in data/landing. Invalid files are logged and skipped
+        (the rest are still registered, each in its own transaction); returns 1 if anything failed, else 0."""
+        metadata, errors = (parser or YamlMetadataParser(project_root)).collect()
+        for e in errors:
+            log.error("%s", e)
+        failed = self.run(metadata) if metadata else 0
+        return 1 if errors or failed else 0
+
+
 if __name__ == "__main__":
-    sys.exit(MetadataRegistry().run())
+    sys.exit(MetadataRegistry().register_from_yaml())

@@ -1,5 +1,6 @@
 import csv
 import logging
+import re
 import shutil
 import time
 from pathlib import Path
@@ -7,6 +8,8 @@ from pathlib import Path
 import pandas as pd
 import pyogrio
 from datetime import datetime, timezone
+
+from i_p_f_w.metadata_manager.yaml_metadata_parser import sidecars_for
 
 log = logging.getLogger(__name__)
 
@@ -17,9 +20,26 @@ SUPPORTED_EXTENSIONS = TABULAR_EXTENSIONS | GEOSPATIAL_EXTENSIONS
 TARGET_DATABASE = "humanitarian_db"
 TARGET_SCHEMA = "raw_data"
 
+# Dataset names end with a year, year_month or year_month_day (jiaf_south_sudan_2025, ..._2025_10, ..._2025_10_15).
+DATE_SUFFIX = re.compile(r"_(\d{4})(?:_(\d{2}))?(?:_(\d{2}))?$")
+
 # Prevalidation only answers "is this safe to load into the raw layer?".
 # Missing-value profiling, duplicate rows/features (WKB), statistics and
 # cleaning are deliberately left to dbt staging / downstream DQ.
+
+
+def chronological_key(stem):
+    """Sort key from the date at the end of a dataset name: (0, year, month, day), where a missing month or day counts
+    as the start of that period. Names without a valid date suffix get (1, 0, 0, 0), so they sort after dated ones."""
+    m = DATE_SUFFIX.search(stem)
+    if m:
+        year, month, day = int(m[1]), int(m[2] or 0), int(m[3] or 0)
+        try:
+            datetime(year, month or 1, day or 1)
+            return (0, year, month, day)
+        except ValueError:
+            pass
+    return (1, 0, 0, 0)
 
 
 def make_unique_columns(names):
@@ -94,10 +114,19 @@ class Prevalidationjob:
         self.metadata_dir = layer / "metadata_manager" / "metadata"
 
     def discover_datasets(self):
-        return sorted(
+        """Datasets grouped by folder, oldest first within a folder (by the date at the end of the name), so
+        registration and loading follow chronological order. The order never depends on file timestamps."""
+        paths = [
             p for p in self.landing.rglob("*")
             if p.is_file() and p.suffix.lower() in SUPPORTED_EXTENSIONS
-        )
+        ]
+        for p in paths:
+            if chronological_key(p.stem)[0]:
+                log.warning(
+                    "%s: name does not end with a valid year, year_month or year_month_day; "
+                    "ordered after the dated datasets in its folder", p.name,
+                )
+        return sorted(paths, key=lambda p: (p.parent, chronological_key(p.stem), p.name))
 
     @staticmethod
     def list_spatial_layers(path):
@@ -170,6 +199,8 @@ class Prevalidationjob:
             files = [f for f in path.parent.iterdir() if f.is_file() and f.stem == path.stem]
         else:
             files = [path]
+        # the metadata YAML follows its data file into rejected/
+        files += [f for f in sidecars_for(path) if f not in files]
         for f in files:
             shutil.move(str(f), str(dest_dir / f.name))
 
