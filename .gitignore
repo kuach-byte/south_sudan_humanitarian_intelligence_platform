@@ -28,3 +28,5 @@ Thumbs.db
 
 # Dagster temporary directories
 .tmp_dagster_home_*/
+
+query_to_excel.py

@@ -11,3 +11,6 @@ openpyxl
 xlrd
 pyarrow
 scipy
+dbt
+dbt-core=>1.11.8
+dbt-postgres=>1.10.0

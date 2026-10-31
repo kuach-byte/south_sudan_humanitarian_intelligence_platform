@@ -1,0 +1,32 @@
+name: south_sudan_humanitarian_intelligence_platform
+version: '1.0.0'
+config-version: 2
+
+profile: south_sudan_humanitarian_intelligence_platform
+
+model-paths: ["models"]
+test-paths: ["tests"]
+analysis-paths: ["analyses"]
+macro-paths: ["macros"]
+seed-paths: ["seeds"]
+snapshot-paths: ["snapshots"]
+
+clean-targets:
+  - "target"
+  - "dbt_packages"
+
+models:
+  south_sudan_humanitarian_intelligence_platform:
+    +materialized: view
+
+    staging:
+      +schema: staging
+      +materialized: view
+
+    intermediate:
+      +schema: intermediate
+      +materialized: view
+
+    marts:
+      +schema: cleaned_data
+      +materialized: table

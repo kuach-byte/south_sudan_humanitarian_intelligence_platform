@@ -21,6 +21,7 @@ CREATE TABLE IF NOT EXISTS data_profiling.column_profile (
         REFERENCES data_profiling.profile_run(run_id)
         ON DELETE CASCADE,
 
+    table_name          TEXT NOT NULL,
     column_name         TEXT NOT NULL,
     source_data_type    TEXT,
     inferred_type       TEXT,

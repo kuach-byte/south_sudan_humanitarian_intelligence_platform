@@ -21,12 +21,13 @@ log = logging.getLogger(__name__)
 SCHEMA_DIR = Path(__file__).parent
 MAINTENANCE_DB = "postgres"  # PostgreSQL's default maintenance database, used only to create the target database
 RAW_SCHEMA = "raw_data"
+
 # (schema, DDL file), in dependency order: profiling_schemas.sql references metadata_manager.dataset
 DDL_FILES = [
+    ("raw_data", "raw_data.sql"),
     ("metadata_manager", "metadata_schemas.sql"),
     ("data_profiling", "profiling_schemas.sql"),
 ]
-
 
 class BootstrapError(Exception):
     pass
@@ -92,8 +93,6 @@ def run_bootstrap():
             if _ensure_schema(cur, RAW_SCHEMA):
                 summary["schemas_created"].append(RAW_SCHEMA)
             for schema, filename in DDL_FILES:
-                if _ensure_schema(cur, schema):
-                    summary["schemas_created"].append(schema)
                 log.info("Executing %s", filename)
                 try:
                     cur.execute((SCHEMA_DIR / filename).read_text(encoding="utf-8"))

@@ -1,4 +1,5 @@
 import csv
+import json
 import logging
 import re
 import shutil
@@ -9,6 +10,7 @@ import pandas as pd
 import pyogrio
 from datetime import datetime, timezone
 
+from i_p_f_w.ingestion.integrity import rows_sum, source_files, source_sha256
 from i_p_f_w.metadata_manager.yaml_metadata_parser import sidecars_for
 
 log = logging.getLogger(__name__)
@@ -19,6 +21,9 @@ SUPPORTED_EXTENSIONS = TABULAR_EXTENSIONS | GEOSPATIAL_EXTENSIONS
 
 TARGET_DATABASE = "humanitarian_db"
 TARGET_SCHEMA = "raw_data"
+
+# CSV/Excel are read as text: no type inference, and only a blank cell is NULL ("NA", "null", "N/A" stay as written).
+TEXT_READ = {"dtype": str, "keep_default_na": False, "na_values": [""]}
 
 # Dataset names end with a year, year_month or year_month_day (jiaf_south_sudan_2025, ..._2025_10, ..._2025_10_15).
 DATE_SUFFIX = re.compile(r"_(\d{4})(?:_(\d{2}))?(?:_(\d{2}))?$")
@@ -43,20 +48,31 @@ def chronological_key(stem):
 
 
 def make_unique_columns(names):
-    """Return (unique_names, renamed). renamed is a list of (old, new) pairs."""
+    """Return (unique_names, renamed). Names are kept exactly as written; only empty or duplicate ones are changed
+    (a table cannot have them). renamed is a list of (old, new) pairs."""
     used, out, renamed = set(), [], []
     for i, raw in enumerate(names):
-        name = "" if pd.isna(raw) else str(raw).strip()
+        name = "" if pd.isna(raw) else str(raw)
         base = name or f"unnamed_{i + 1}"
         new, n = base, 1
         while new in used:
             n += 1
             new = f"{base}_{n}"
         used.add(new)
-        if new != ("" if pd.isna(raw) else str(raw)):
-            renamed.append(("" if pd.isna(raw) else str(raw), new))
+        if new != name:
+            renamed.append((name, new))
         out.append(new)
     return out, renamed
+
+
+def verify_csv(df, path):
+    """Re-read the CSV with the csv module and check pandas produced exactly the same cells."""
+    with open(path, newline="", encoding="utf-8-sig") as f:
+        reader = csv.reader(f)
+        next(reader, None)
+        expected = rows_sum([c or None for c in row] + [None] * (df.shape[1] - len(row)) for row in reader if row)
+    if expected != rows_sum(df.itertuples(index=False, name=None)):
+        raise ValueError("parsed cells differ from the file's cells (shifted or altered values)")
 
 
 def validate_general(df):
@@ -162,12 +178,13 @@ class Prevalidationjob:
                 return pd.DataFrame()
 
             names, renamed = make_unique_columns(header)
-            df = pd.read_csv(path, header=0, names=names, encoding="utf-8-sig")
+            df = pd.read_csv(path, header=0, names=names, encoding="utf-8-sig", **TEXT_READ)
+            verify_csv(df, path)
             df.attrs["renamed_columns"] = renamed
             return df
 
         if ext in {".xlsx", ".xls"}:
-            raw = pd.read_excel(path, header=None)
+            raw = pd.read_excel(path, header=None, **TEXT_READ)
 
             if raw.empty:
                 return pd.DataFrame()
@@ -180,9 +197,11 @@ class Prevalidationjob:
 
 
         if ext == ".json":
-            return pd.read_json(path)
+            # json.load keeps big integers exact and ints next to nulls as ints (read_json turns them into floats)
+            with open(path, encoding="utf-8-sig") as f:
+                return pd.DataFrame(json.load(f), dtype=object)
 
-        return pd.read_parquet(path)
+        return pd.read_parquet(path, dtype_backend="numpy_nullable")
 
     @staticmethod
     def prevalidate(data, path):
@@ -194,11 +213,7 @@ class Prevalidationjob:
     def reject_dataset(self, path):
         dest_dir = (self.rejected / path.relative_to(self.landing)).parent
         dest_dir.mkdir(parents=True, exist_ok=True)
-        # a shapefile is a set of sidecar files sharing one stem
-        if path.suffix.lower() == ".shp":
-            files = [f for f in path.parent.iterdir() if f.is_file() and f.stem == path.stem]
-        else:
-            files = [path]
+        files = source_files(path)
         # the metadata YAML follows its data file into rejected/
         files += [f for f in sidecars_for(path) if f not in files]
         for f in files:
@@ -281,6 +296,7 @@ class Prevalidationjob:
             # -------------------------
             # Extraction
             # -------------------------
+            source_sha = source_sha256(path)
             extraction_start = time.perf_counter()
 
             try:
@@ -300,6 +316,8 @@ class Prevalidationjob:
                 validation_start = time.perf_counter()
 
                 errors, warnings = self.prevalidate(data, path)
+                if source_sha256(path) != source_sha:
+                    errors.append("Source file changed during extraction")
 
                 validation_time = time.perf_counter() - validation_start
 
@@ -333,6 +351,7 @@ class Prevalidationjob:
 
             else:
                 result["metadata"] = self.build_metadata(path)
+                result["metadata"]["integrity"] = {"source_sha256": source_sha}
                 result["status"] = "valid"
                 result["data"] = data
 

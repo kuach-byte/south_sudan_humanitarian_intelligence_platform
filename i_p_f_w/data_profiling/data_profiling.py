@@ -157,13 +157,14 @@ def _profile_table(cur, run_id, schema, table, correlations):
 
     # ---- column_profile ----
     rows = [
-        (run_id, c["name"], c["data_type"], c["inferred"], total, c["nn"], c["nulls"], c.get("emp", 0), c.get("dist"),
-         c.get("sent"), _pct(c["emp"], total) if "emp" in c else None, c.get("ws"), _pct(c["ws"], total) if "ws" in c else None)
+        (run_id, c["name"], table, c["data_type"], c["inferred"], total, c["nn"], c["nulls"], c.get("emp", 0), c.get("dist"),
+        c.get("sent"), _pct(c["emp"], total) if "emp" in c else None, c.get("ws"), _pct(c["ws"], total) if "ws" in c else None)
         for c in cols
     ]
     ids = dict(execute_values(
         cur,
-        "INSERT INTO data_profiling.column_profile (run_id, column_name, source_data_type, inferred_type, total_count, "
+        "INSERT INTO data_profiling.column_profile "
+        "(run_id, column_name, table_name, source_data_type, inferred_type, total_count, "
         "non_null_count, null_count, empty_string_count, distinct_count, sentinel_count, empty_string_pct, "
         "whitespace_only_count, whitespace_only_pct) VALUES %s RETURNING column_name, column_profile_id",
         rows, fetch=True,

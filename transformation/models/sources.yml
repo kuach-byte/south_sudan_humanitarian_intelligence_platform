@@ -1,0 +1,25 @@
+version: 2
+
+sources:
+  - name: humanitarian_db
+    description: "Raw humanitarian and administrative boundary data ingested into PostgreSQL."
+    schema: raw_data
+
+    tables:
+      - name: ssd_admin2
+        description: "South Sudan administrative level 2 boundaries."
+
+      - name: ssd_adminpoints
+        description: "Administrative point features for South Sudan."
+
+      - name: ssd_adminlines
+        description: "Administrative boundary line features for South Sudan."
+
+      - name: ssd_admin1
+        description: "South Sudan administrative level 1 boundaries."
+
+      - name: jiaf_south_sudan_2026
+        description: "Joint Intersectoral Analysis Framework data for South Sudan, 2026."
+
+      - name: ssd_admin3
+        description: "South Sudan administrative level 3 boundaries."
