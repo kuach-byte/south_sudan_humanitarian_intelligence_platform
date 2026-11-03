@@ -1,0 +1,10 @@
+version: 2
+models:
+  - name: dim_severity
+    description: >
+      Distinct severity values from int_jiaf_2026. IDs are sequential from 1 by alphabetical value.
+    columns:
+      - name: severity_id
+        data_tests: [unique, not_null]
+      - name: severity_level
+        data_tests: [unique, not_null]

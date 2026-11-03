@@ -21,5 +21,8 @@ sources:
       - name: jiaf_south_sudan_2026
         description: "Joint Intersectoral Analysis Framework data for South Sudan, 2026."
 
+      - name: jiaf_south_sudan_2025
+        description: "Joint Intersectoral Analysis Framework data for South Sudan, 2025."
+
       - name: ssd_admin3
         description: "South Sudan administrative level 3 boundaries."

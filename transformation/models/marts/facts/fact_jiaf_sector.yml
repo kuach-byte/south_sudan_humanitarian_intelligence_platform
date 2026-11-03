@@ -1,0 +1,28 @@
+version: 2
+models:
+  - name: fact_jiaf_sector
+    description: >
+      Sector-level JIAF PiN by reporting year, ADM2 location, sector and population group. The eight pin_*
+      columns of int_jiaf_2025 and int_jiaf_2026 are unpivoted and mapped to dim_sectors by sector_name.
+      Rows with a NULL sector_pin_value are kept. Overall measures are in fact_jiaf_population.
+    data_tests:
+      - dbt_utils.unique_combination_of_columns:
+          combination_of_columns: [year, adm2_pcode, sector_id, population_id]
+    columns:
+      - name: year
+        data_tests:
+          - not_null
+          - accepted_values: {values: [2025, 2026], quote: false}
+      - name: adm2_pcode
+        data_tests:
+          - not_null
+          - relationships: {to: ref('dim_locations'), field: adm2_pcode, config: {severity: warn}}
+      - name: sector_id
+        data_tests:
+          - not_null
+          - relationships: {to: ref('dim_sectors'), field: sector_id}
+      - name: population_id
+        data_tests:
+          - not_null
+          - relationships: {to: ref('dim_population'), field: population_id}
+      - name: sector_pin_value

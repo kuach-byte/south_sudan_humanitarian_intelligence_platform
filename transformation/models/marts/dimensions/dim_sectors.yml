@@ -1,0 +1,9 @@
+version: 2
+models:
+  - name: dim_sectors
+    description: One row per JIAF sector. IDs are sequential from 1 by alphabetical sector name.
+    columns:
+      - name: sector_id
+        data_tests: [unique, not_null]
+      - name: sector_name
+        data_tests: [unique, not_null]

@@ -1,0 +1,33 @@
+version: 2
+models:
+  - name: stg_ssd_admin1
+    description: >
+      Staged South Sudan admin level 1 boundaries. Text trimmed (blank -> NULL); pcodes kept as text;
+      area_sqkm, center_lat and center_lon are source-provided, not recomputed from the geometry.
+      Spatial measurements downstream must use geography or a projected CRS, not 4326 geometry directly.
+    meta:
+      excluded_columns: {}
+    columns:
+      - name: adm1_name
+        data_tests:
+          - not_null
+      - name: adm1_pcode
+        data_tests:
+          - not_null
+          - unique
+      - name: adm1_ref_name
+      - name: adm0_name
+      - name: adm0_pcode
+        data_tests:
+          - not_null
+      - name: valid_on
+      - name: area_sqkm
+      - name: center_lat
+      - name: center_lon
+      - name: version
+      - name: lang
+      - name: geometry
+        description: >
+          PostGIS geometry as loaded (not repaired, not reprojected). Expected type and SRID are asserted by
+          tests/assert_staging_geometry_type_srid.sql; validity is warn-only in
+          tests/assert_staging_geometry_validity.sql.

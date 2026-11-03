@@ -1,0 +1,31 @@
+version: 2
+models:
+  - name: dim_locations
+    description: >
+      One row per ADM2 location (South Sudan). Boundary attributes and geometry from stg_ssd_admin2;
+      x_coord / y_coord from the ADM2-level point in stg_ssd_adminpoints.
+    columns:
+      - name: adm2_pcode
+        data_tests: [unique, not_null]
+      - name: adm2_name
+        data_tests: [not_null]
+      - name: adm1_name
+        data_tests: [not_null]
+      - name: adm1_pcode
+        data_tests: [not_null]
+      - name: adm0_name
+        data_tests: [not_null]
+      - name: adm0_pcode
+        data_tests: [not_null]
+      - name: area_sqkm
+        data_tests: [not_null]
+      - name: center_lat
+        data_tests: [not_null]
+      - name: center_lon
+        data_tests: [not_null]
+      - name: x_coord
+        data_tests: [not_null]
+      - name: y_coord
+        data_tests: [not_null]
+      - name: geometry
+        data_tests: [not_null]

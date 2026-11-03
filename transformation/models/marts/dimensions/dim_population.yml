@@ -1,0 +1,11 @@
+version: 2
+models:
+  - name: dim_population
+    description: >
+      Distinct population groups across int_jiaf_2025 and int_jiaf_2026. IDs are sequential from 1
+      by alphabetical name; labels are kept as they appear in the intermediate models.
+    columns:
+      - name: population_id
+        data_tests: [unique, not_null]
+      - name: population_name
+        data_tests: [unique, not_null]

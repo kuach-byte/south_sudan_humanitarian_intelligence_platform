@@ -1,0 +1,32 @@
+version: 2
+models:
+  - name: stg_jiaf_south_sudan_2026
+    description: >
+      JIAF 2026 people in need (PiN) by admin 2 and population group. Same header handling as 2025.
+      Admin 3 name and code, Pocket of need and Evidence & Comments are not staged: they were excluded
+      from the eligible profiling columns (excessive missingness / critical or error issues).
+      Column mapping from raw positions was inferred and should be confirmed against the source file.
+    meta:
+      excluded_columns: {}
+    columns:
+      - {name: adm1_name, meta: {source_column: Location}}
+      - {name: adm1_pcode, meta: {source_column: unnamed_2}, data_tests: [not_null]}
+      - {name: adm2_name, meta: {source_column: unnamed_3}}
+      - name: adm2_pcode
+        meta: {source_column: unnamed_4}
+        data_tests:
+          - not_null
+          - relationships: {to: ref('stg_ssd_admin2'), field: adm2_pcode, config: {severity: warn}}
+      - {name: affected_population_projection, meta: {source_column: Populaton}}
+      - {name: population_group, meta: {source_column: unnamed_9}, data_tests: [not_null]}
+      - {name: pin_cccm, meta: {source_column: "Sectoral PiN (Number)"}}
+      - {name: pin_education, meta: {source_column: unnamed_11}}
+      - {name: pin_nutrition, meta: {source_column: unnamed_12}}
+      - {name: pin_food_security, meta: {source_column: unnamed_13}}
+      - {name: pin_health, meta: {source_column: unnamed_14}}
+      - {name: pin_overarching_protection, meta: {source_column: unnamed_15}}
+      - {name: pin_shelter, meta: {source_column: unnamed_16}}
+      - {name: pin_wash, meta: {source_column: unnamed_17}}
+      - {name: severity, meta: {source_column: unnamed_18}}
+      - {name: preliminary_pin, meta: {source_column: unnamed_19}}
+      - {name: final_pin, meta: {source_column: unnamed_20}, data_tests: [not_null]}

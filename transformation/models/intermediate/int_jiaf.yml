@@ -1,0 +1,60 @@
+version: 2
+models:
+  - name: int_jiaf_2025
+    description: >
+      JIAF 2025 PiN by ADM2 and population group. Population group standardised; no values imputed.
+      No severity indicator exists for 2025.
+    columns:
+      - name: adm2_pcode
+        data_tests:
+          - not_null: {config: {severity: warn}}
+
+          - relationships:
+              arguments:
+                to: ref('dim_locations')
+                field: adm2_pcode
+              config:
+                severity: warn
+      - name: population_group
+        data_tests:
+          - not_null: {config: {severity: warn}}
+          - accepted_values:
+              arguments: {values: [idp, host_community, returnee, refugee, residents]}
+              config: {severity: warn}
+      - {name: affected_population, data_tests: [{not_null: {config: {severity: warn}}}]}
+      - {name: pin_cccm, data_tests: [{not_null: {config: {severity: warn}}}]}
+      - {name: pin_education, data_tests: [{not_null: {config: {severity: warn}}}]}
+      - {name: pin_nutrition, data_tests: [{not_null: {config: {severity: warn}}}]}
+      - {name: pin_food_security, data_tests: [{not_null: {config: {severity: warn}}}]}
+      - {name: pin_health, data_tests: [{not_null: {config: {severity: warn}}}]}
+      - {name: pin_overarching_protection, data_tests: [{not_null: {config: {severity: warn}}}]}
+      - {name: pin_shelter, data_tests: [{not_null: {config: {severity: warn}}}]}
+      - {name: pin_wash, data_tests: [{not_null: {config: {severity: warn}}}]}
+      - {name: final_pin, data_tests: [{not_null: {config: {severity: warn}}}]}
+
+  - name: int_jiaf_2026
+    description: >
+      JIAF 2026 PiN by ADM2 and population group. Population is a projection and severity is 2026 only,
+      so neither is comparable to the 2025 columns.
+    columns:
+      - name: adm2_pcode
+        data_tests:
+          - not_null: {config: {severity: warn}}
+          - relationships: {to: ref('dim_locations'), field: adm2_pcode, config: {severity: warn}}
+      - name: population_group
+        data_tests:
+          - not_null: {config: {severity: warn}}
+          - accepted_values:
+              arguments: {values: [idp, host_community, returnee, refugee, residents]}
+              config: {severity: warn}
+      - {name: affected_population_projection, data_tests: [{not_null: {config: {severity: warn}}}]}
+      - {name: pin_cccm, data_tests: [{not_null: {config: {severity: warn}}}]}
+      - {name: pin_education, data_tests: [{not_null: {config: {severity: warn}}}]}
+      - {name: pin_nutrition, data_tests: [{not_null: {config: {severity: warn}}}]}
+      - {name: pin_food_security, data_tests: [{not_null: {config: {severity: warn}}}]}
+      - {name: pin_health, data_tests: [{not_null: {config: {severity: warn}}}]}
+      - {name: pin_overarching_protection, data_tests: [{not_null: {config: {severity: warn}}}]}
+      - {name: pin_shelter, data_tests: [{not_null: {config: {severity: warn}}}]}
+      - {name: pin_wash, data_tests: [{not_null: {config: {severity: warn}}}]}
+      - {name: severity, data_tests: [{not_null: {config: {severity: warn}}}]}
+      - {name: final_pin, data_tests: [{not_null: {config: {severity: warn}}}]}

@@ -1,0 +1,37 @@
+version: 2
+models:
+  - name: stg_ssd_adminpoints
+    description: >
+      Staged South Sudan administrative point features. x_coord/y_coord are assumed to be lon/lat
+      (verify against the raw ranges); `name` renamed to place_name.
+    meta:
+      excluded_columns: {}
+    columns:
+      - name: admin_level
+        data_tests: [not_null]
+      - name: place_name
+        meta: {source_column: name}
+      - name: x_coord
+      - name: y_coord
+      - name: adm3_name
+      - name: adm3_pcode
+      - name: adm2_name
+      - name: adm2_pcode
+        data_tests:
+          - unique:
+              config:
+                where: "admin_level = 2 and adm2_pcode is not null"
+          - relationships:
+              to: ref('stg_ssd_admin2')
+              field: adm2_pcode
+      - name: adm1_name
+      - name: adm1_pcode
+      - name: adm0_name
+      - name: adm0_pcode
+      - name: valid_on
+      - name: version
+      - name: lang
+      - name: geometry
+        description: >
+          PostGIS geometry as loaded (not repaired, not reprojected). Type/SRID asserted in
+          tests/assert_staging_geometry_type_srid.sql; validity is warn-only.

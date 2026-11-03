@@ -1,0 +1,15 @@
+version: 2
+models:
+  - name: stg_ssd_adminlines
+    description: Staged South Sudan administrative boundary lines. Geometry kept as loaded.
+    meta:
+      excluded_columns: {}
+    columns:
+      - name: adm_level
+        data_tests: [not_null]
+      - name: valid_on
+      - name: version
+      - name: geometry
+        description: >
+          PostGIS geometry as loaded (not repaired, not reprojected). Type/SRID asserted in
+          tests/assert_staging_geometry_type_srid.sql; validity is warn-only.
